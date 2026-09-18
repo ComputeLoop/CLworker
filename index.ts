@@ -93,6 +93,6 @@ while (true) {
 
   if (!job) {
     console.log("😴 No jobs available. Waiting...");
-    await Bun.sleep(3000);
+    await new Promise(resolve => setTimeout(resolve, 3000));
   }
 }
