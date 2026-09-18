@@ -1,0 +1,13 @@
+{
+  "name": "worker",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "@types/node": "^22.20.3"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
