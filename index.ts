@@ -43,51 +43,65 @@ type Job = {
   };
 };
 async function getJob() {
-  const response = await fetch(
-  `${API_URL}/jobs/next?workerId=${WORKER_ID}&projectId=${PROJECT_ID}`,
-);
+  try {
+    const response = await fetch(
+      `${API_URL}/jobs/next?workerId=${WORKER_ID}&projectId=${PROJECT_ID}`,
+    );
 
-  if (!response.ok) {
-    console.log("📭 No jobs available");
+    if (response.status === 404) {
+      console.log("📭 No jobs available");
+      return null;
+    }
+
+    if (!response.ok) {
+      console.log(`⚠️ Server returned HTTP ${response.status}`);
+      return null;
+    }
+
+    const job = (await response.json()) as Job;
+
+    console.log("📦 Received job:");
+    console.log(job);
+
+    console.log(
+      `🔬 Computing primes from ${job.input.start} to ${job.input.end}...`,
+    );
+
+    const primes = findPrimes(job.input.start, job.input.end);
+
+    console.log(`✅ Computation finished! Found ${primes.length} primes.`);
+
+    const completeResponse = await fetch(
+      `${API_URL}/jobs/${job.id}/complete`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          result: `Found ${primes.length} primes`,
+        }),
+      },
+    );
+
+    if (!completeResponse.ok) {
+      console.log(
+        `❌ Failed to submit result (HTTP ${completeResponse.status})`,
+      );
+      return null;
+    }
+
+    const completedJob = await completeResponse.json();
+
+    console.log("📤 Result submitted successfully!");
+    console.log(completedJob);
+
+    return job;
+  } catch (error) {
+    console.log("🌐 Connection error:", error);
     return null;
   }
-
-  const job = (await response.json()) as Job;
-
-  console.log("📦 Received job:");
-  console.log(job);
-
-  console.log(
-    `🔬 Computing primes from ${job.input.start} to ${job.input.end}...`,
-  );
-
-  const primes = findPrimes(job.input.start, job.input.end);
-
-  console.log(`✅ Computation finished! Found ${primes.length} primes.`);
-
-  const completeResponse = await fetch(`${API_URL}/jobs/${job.id}/complete`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      result: `Found ${primes.length} primes`,
-    }),
-  });
-
-  if (!completeResponse.ok) {
-    console.log("❌ Failed to submit result");
-    return null;
-  }
-
-  const completedJob = await completeResponse.json();
-
-  console.log("📤 Result submitted successfully!");
-  console.log(completedJob);
-
-  return job;
 }
-
 while (true) {
   const job = await getJob();
 
