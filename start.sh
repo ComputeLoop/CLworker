@@ -22,7 +22,7 @@ echo "   Project    : $PROJECT"
 # 1) Bun runtime ---------------------------------------------------------------
 if ! command -v bun >/dev/null 2>&1; then
   echo "→ Bun not found, installing…"
-  curl -fsSL https://bun.sh/install | bash
+  curl -fsSL --connect-timeout 15 --max-time 180 https://bun.sh/install | bash
 fi
 export PATH="$HOME/.bun/bin:$PATH"
 
@@ -31,7 +31,7 @@ WORKDIR="${CL_WORKER_DIR:-$HOME/.computeloop/worker}"
 rm -rf "$WORKDIR"
 mkdir -p "$WORKDIR"
 echo "→ Fetching worker…"
-curl -fsSL https://github.com/ComputeLoop/CLworker/archive/refs/heads/master.tar.gz \
+curl -fsSL --connect-timeout 15 --max-time 180 https://github.com/ComputeLoop/CLworker/archive/refs/heads/master.tar.gz \
   | tar -xz -C "$WORKDIR" --strip-components=1
 
 # 3) Optional dependencies (GPU image-classify only; tolerate failure) ---------
