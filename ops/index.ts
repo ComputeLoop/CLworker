@@ -8,7 +8,9 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { runImageHash, writeJsonl } from "./image-hash";
 import { runTabularStats } from "./tabular-stats";
-import { runImageClassify } from "./image-classify";
+// image-classify is NOT imported eagerly: it pulls in sharp + onnxruntime-node,
+// which CPU-only contributors should never have to install. It is loaded on
+// demand (and fails with a clear PermanentFailure if the deps are missing).
 
 export interface ChunkInput {
   kind: "file-list" | "tabular";
@@ -62,6 +64,8 @@ export async function runOp(
     }
 
     case "image-classify": {
+      // Loaded on demand so CPU-only contributors never install sharp/onnx.
+      const { runImageClassify } = await import("./image-classify");
       const modelPath = process.env.MODEL_PATH ?? "";
       const labelsPath = process.env.MODEL_LABELS;
       const result = await runImageClassify(inputDir, input.items ?? [], {
