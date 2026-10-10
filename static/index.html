@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Compute Loop &middot; Contributor</title>
+<style>
+  @import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap");
+
+  :root {
+    font-family: "DM Sans", system-ui, sans-serif;
+    color: #1c1c1f;
+    background: #f7f7f5;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-width: 320px; }
+  button { cursor: pointer; font: inherit; }
+  input, select { font: inherit; }
+
+  .topbar {
+    height: 64px;
+    border-bottom: 1px solid #e7e7e3;
+    background: rgba(247, 247, 245, 0.94);
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(8px);
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 24px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.02em; font-size: 16px; }
+  .brand-mark {
+    width: 28px; height: 28px; display: grid; place-items: center;
+    border-radius: 8px; background: #1c1c1f; color: #f7f7f5;
+    font-size: 15px; font-weight: 700;
+  }
+  .brand-sub { color: #777773; font-size: 13px; }
+  .pill {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12.5px; font-weight: 600;
+    padding: 5px 11px; border-radius: 999px;
+    background: #ecece8; color: #777773;
+    border: 1px solid #e0e0db;
+  }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #aaa; }
+  .pill.green  { background: #eaf4ee; color: #3c7554; border-color: #d6e9dd; }
+  .pill.green .dot  { background: #4d8b64; }
+  .pill.blue   { background: #edf1f7; color: #4f6386; border-color: #dde5ef; }
+  .pill.blue .dot   { background: #697b9c; }
+  .pill.amber  { background: #f8f1e3; color: #8a6a3a; border-color: #efe3cd; }
+  .pill.amber .dot  { background: #b28a4d; }
+  .pill.red    { background: #fff1f1; color: #96221a; border-color: #f6dcd9; }
+  .pill.red .dot    { background: #b42318; }
+
+  main { max-width: 760px; margin: 0 auto; padding: 28px 24px 60px; }
+
+  .card {
+    background: #fafaf8;
+    border: 1px solid #e7e7e3;
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-head {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 700; font-size: 15px; margin-bottom: 6px;
+  }
+  .step {
+    width: 22px; height: 22px; display: grid; place-items: center;
+    background: #1c1c1f; color: #f7f7f5;
+    border-radius: 7px; font-size: 12px; font-weight: 700;
+  }
+  .hint { color: #777773; font-size: 13.5px; line-height: 1.55; margin: 6px 0 14px; }
+  .error { color: #b42318; background: #fff1f1; border: 1px solid #f6dcd9; border-radius: 9px; padding: 9px 12px; font-size: 13.5px; margin: 12px 0 0; white-space: pre-wrap; }
+  .error[hidden] { display: none; }
+  .ok { color: #3c7554; background: #eaf4ee; border: 1px solid #d6e9dd; border-radius: 9px; padding: 9px 12px; font-size: 13.5px; margin: 12px 0 0; }
+
+  label { display: block; font-size: 13px; font-weight: 600; color: #45454a; margin-bottom: 12px; }
+  input[type="password"], input[type="text"], input[type="url"], select {
+    width: 100%; margin-top: 6px;
+    padding: 10px 12px;
+    border: 1px solid #dedeD9; border-radius: 9px;
+    background: #fff; color: #1c1c1f; font-size: 14px;
+    outline: none;
+  }
+  input:focus, select:focus { border-color: #1c1c1f; }
+  input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
+  .primary {
+    background: #1c1c1f; color: #f7f7f5;
+    border: none; border-radius: 9px;
+    padding: 10px 18px; font-weight: 600; font-size: 14px;
+  }
+  .primary:hover:not(:disabled) { background: #333338; }
+  .primary:disabled { opacity: 0.5; cursor: default; }
+  .danger { background: #b42318; color: #fff; border: none; border-radius: 9px; padding: 10px 18px; font-weight: 600; font-size: 14px; }
+  .danger:hover { background: #c9352b; }
+  .ghost {
+    background: #f5f5f2; color: #45454a;
+    border: 1px solid #e0e0db; border-radius: 9px;
+    padding: 9px 14px; font-weight: 600; font-size: 13.5px;
+  }
+  .ghost:hover { background: #ecece8; }
+
+  details { margin-bottom: 14px; }
+  summary { color: #777773; font-size: 13px; cursor: pointer; user-select: none; padding: 4px 0; }
+
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .row select { flex: 1 1 320px; width: auto; margin-top: 0; }
+  .stat { font-size: 13.5px; color: #777773; margin-left: auto; }
+  .stat strong { color: #1c1c1f; font-size: 15px; }
+
+  .log-card { padding-bottom: 14px; }
+  .log-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-weight: 700; font-size: 15px; }
+  .log {
+    background: #f5f5f2; border: 1px solid #e7e7e3; border-radius: 10px;
+    height: 320px; overflow-y: auto;
+    padding: 12px 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px; line-height: 1.7;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .log .line { color: #45454a; }
+  .log .line.warn { color: #8a6a3a; }
+  .log .line.error { color: #b42318; }
+  .log .empty { color: #9a9a96; font-style: italic; }
+
+  footer { color: #9a9a96; font-size: 12.5px; text-align: center; margin-top: 24px; line-height: 1.7; }
+  footer a { color: #777773; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="brand-mark">C</span> Compute Loop</div>
+  <div class="brand-sub">Contributor app</div>
+  <div class="pill" id="pill"><span class="dot"></span><span id="pillText">Connecting&hellip;</span></div>
+</header>
+
+<main>
+  <!-- 1 · Connect -->
+  <section class="card" id="connectCard">
+    <div class="card-head"><span class="step">1</span> Connect your machine</div>
+    <p class="hint">
+      Register your machine on the project's <strong>Contribute</strong> page in
+      the web app, copy the key it shows (only once), and paste it here.
+      The key is stored on this machine only — you never have to type it again.
+    </p>
+    <form id="keyForm">
+      <label>Worker API key
+        <input class="mono" id="keyInput" type="password" placeholder="clw_&hellip;"
+               autocomplete="off" spellcheck="false" />
+      </label>
+      <details>
+        <summary>Custom backend server</summary>
+        <label>Backend URL
+          <input id="apiBaseInput" type="url" placeholder="https://cl.elysiavernight.com"
+                 autocomplete="off" spellcheck="false" />
+        </label>
+      </details>
+      <button class="primary" type="submit" id="connectBtn">Connect</button>
+    </form>
+    <p class="error" id="keyError" hidden></p>
+  </section>
+
+  <!-- 2 · Work -->
+  <section class="card" id="workCard" hidden>
+    <div class="card-head"><span class="step">2</span> Pick a project &amp; start</div>
+    <p class="hint" id="connectedAs">&nbsp;</p>
+    <div class="row">
+      <select id="projectSelect"><option value="">Loading projects&hellip;</option></select>
+      <button class="ghost" id="refreshBtn" title="Refresh project list">&#10227; Refresh</button>
+    </div>
+    <div class="row">
+      <button class="primary" id="startBtn">Start contributing</button>
+      <button class="danger" id="stopBtn" hidden>Stop</button>
+      <span class="stat">Chunks this run: <strong id="chunkCount">0</strong></span>
+    </div>
+    <p class="hint" style="margin-top:12px">
+      Stopping finishes the chunk already running first, so nothing you
+      processed is lost. Your machine only runs the platform's standardized
+      operations — never renter code.
+    </p>
+    <p class="error" id="workError" hidden></p>
+    <div class="row">
+      <button class="ghost" id="forgetBtn">Forget key / change machine</button>
+    </div>
+  </section>
+
+  <!-- 3 · Log -->
+  <section class="card log-card">
+    <div class="log-head">Activity <button class="ghost" id="clearBtn">Clear</button></div>
+    <div class="log" id="log"><div class="empty">Waiting for the worker to start&hellip;</div></div>
+  </section>
+
+  <footer>
+    Worker runs locally on 127.0.0.1 &middot; key stored in <code>~/.computeloop/config.json</code><br />
+    <a href="https://clfrontend-eight.vercel.app" target="_blank" rel="noreferrer">Open the Compute Loop web app &rarr;</a>
+  </footer>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const logEl = $("log");
+  let eventSource = null;
+  let pollTimer = null;
+  let state = null;
+
+  async function api(path, options) {
+    const response = await fetch(path, options);
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error((body && body.error) || response.statusText);
+    }
+    return body;
+  }
+
+  // ---- status pill -------------------------------------------------------
+  function renderPill(status, running, detail) {
+    const map = {
+      starting:     ["", "Starting…"],
+      claiming:     ["green", "Claiming a chunk…"],
+      processing:   ["green", "Processing a chunk"],
+      idle:         ["blue", "Waiting for work"],
+      "chunk-failed": ["amber", "Chunk failed · retrying"],
+      stopped:      ["", "Stopped"],
+      error:        ["red", detail ? "Error · " + detail : "Error · check log"],
+    };
+    const [color, text] = map[status] || ["", running ? "Working…" : "Not running"];
+    const pill = $("pill");
+    pill.className = "pill" + (color ? " " + color : "");
+    $("pillText").textContent = text;
+  }
+
+  // ---- log ---------------------------------------------------------------
+  function appendLog(text, level) {
+    const empty = logEl.querySelector(".empty");
+    if (empty) empty.remove();
+    const line = document.createElement("div");
+    line.className = "line" + (level ? " " + level : "");
+    line.textContent = text;
+    logEl.appendChild(line);
+    while (logEl.children.length > 800) logEl.removeChild(logEl.firstChild);
+    const nearBottom =
+      logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 48;
+    if (nearBottom) logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // ---- state -------------------------------------------------------------
+  function render(s) {
+    state = s;
+    $("connectCard").hidden = s.configured;
+    $("workCard").hidden = !s.configured;
+    $("chunkCount").textContent = s.completedChunks;
+
+    if (s.worker) {
+      $("connectedAs").textContent =
+        "Connected as " + s.worker.name + " · " + s.apiBase;
+    }
+
+    const select = $("projectSelect");
+    if (s.projects && s.projects.length) {
+      const current = s.projectId;
+      select.innerHTML = "";
+      for (const project of s.projects) {
+        const option = document.createElement("option");
+        option.value = project.id;
+        option.textContent =
+          project.name + " · " + project.opName + " · " + project.pendingJobs + " chunks left";
+        select.appendChild(option);
+      }
+      if (current && s.projects.some((p) => p.id === current)) {
+        select.value = current;
+      }
+    } else if (s.configured) {
+      select.innerHTML = '<option value="">No open projects right now</option>';
+    }
+
+    select.disabled = s.running;
+    $("refreshBtn").disabled = s.running;
+    $("startBtn").hidden = s.running;
+    $("stopBtn").hidden = !s.running;
+    $("startBtn").disabled = !s.projects || s.projects.length === 0;
+
+    renderPill(s.status, s.running, s.statusDetail);
+
+    if (s.status === "error" && s.statusDetail) {
+      showError("workError", "Worker stopped: " + s.statusDetail +
+        ". Check the log above, fix it, then press Start again.");
+    } else if (s.status !== "error") {
+      hideError("workError");
+    }
+  }
+
+  function showError(id, message) {
+    const el = $(id);
+    el.textContent = message;
+    el.hidden = false;
+  }
+  function hideError(id) { $(id).hidden = true; }
+
+  async function loadState() {
+    try {
+      render(await api("/api/state"));
+      return state;
+    } catch (error) {
+      appendLog("Cannot reach the local app: " + error.message, "error");
+      return null;
+    }
+  }
+
+  // ---- events ------------------------------------------------------------
+  function handleEvent(event) {
+    if (event.type === "log") {
+      appendLog(event.message, event.level === "info" ? null : event.level);
+    } else if (event.type === "status") {
+      renderPill(event.status, event.status !== "stopped" && event.status !== "error", event.detail);
+    } else if (event.type === "chunk" && event.phase === "completed") {
+      appendLog(
+        "✓ Chunk #" + event.jobNumber + " done — " + (event.summary || ""),
+        null,
+      );
+      $("chunkCount").textContent = Number($("chunkCount").textContent) + 1;
+    } else if (event.type === "chunk" && event.phase === "failed") {
+      appendLog(
+        "✗ Chunk #" + event.jobNumber + (event.fatal ? " failed permanently" : " failed, will retry"),
+        "error",
+      );
+    } else if (event.type === "progress") {
+      appendLog(
+        "↗ Project progress: " + event.completed + "/" + event.total,
+        null,
+      );
+    }
+  }
+
+  function connectEvents() {
+    if (eventSource) return;
+    eventSource = new EventSource("/api/events");
+    eventSource.onmessage = (message) => {
+      try {
+        handleEvent(JSON.parse(message.data));
+      } catch {
+        // Ignore malformed frames.
+      }
+    };
+    eventSource.onerror = () => {
+      // EventSource reconnects on its own.
+    };
+  }
+
+  // ---- actions -----------------------------------------------------------
+  $("keyForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    hideError("keyError");
+    const button = $("connectBtn");
+    button.disabled = true;
+    button.textContent = "Checking key…";
+    try {
+      await api("/api/key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey: $("keyInput").value,
+          apiBase: $("apiBaseInput").value,
+        }),
+      });
+      $("keyInput").value = "";
+      appendLog("✓ Key accepted — connecting to the platform…", null);
+      await loadState();
+      await loadProjects();
+    } catch (error) {
+      showError("keyError", error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = "Connect";
+    }
+  });
+
+  async function loadProjects() {
+    try {
+      const list = await api("/api/projects");
+      state = state || {};
+      state.projects = list;
+      state.projectId = state.projectId || (list[0] && list[0].id) || null;
+      render(state);
+    } catch (error) {
+      showError("workError", error.message);
+    }
+  }
+
+  $("refreshBtn").addEventListener("click", loadProjects);
+
+  $("startBtn").addEventListener("click", async () => {
+    hideError("workError");
+    try {
+      await api("/api/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: $("projectSelect").value }),
+      });
+      appendLog("▶ Worker started", null);
+      await loadState();
+    } catch (error) {
+      showError("workError", error.message);
+    }
+  });
+
+  $("stopBtn").addEventListener("click", async () => {
+    try {
+      await api("/api/stop", { method: "POST" });
+      appendLog("■ Stopping after the current chunk…", null);
+    } catch (error) {
+      showError("workError", error.message);
+    }
+  });
+
+  $("forgetBtn").addEventListener("click", async () => {
+    if (!confirm("Forget the stored key on this machine?")) return;
+    try {
+      await api("/api/key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forget: true }),
+      });
+      appendLog("Key removed from this machine.", null);
+      await loadState();
+    } catch (error) {
+      showError("workError", error.message);
+    }
+  });
+
+  $("clearBtn").addEventListener("click", () => {
+    logEl.innerHTML = '<div class="empty">Log cleared.</div>';
+  });
+
+  // ---- boot --------------------------------------------------------------
+  (async () => {
+    const loaded = await loadState();
+    connectEvents();
+    if (loaded && loaded.configured) {
+      if (!loaded.projects || !loaded.projects.length) await loadProjects();
+    }
+    pollTimer = setInterval(loadState, 2500);
+  })();
+</script>
+</body>
+</html>

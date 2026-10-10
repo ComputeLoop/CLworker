@@ -1,25 +1,14 @@
-# Compute Loop — one-line contributor bootstrap (Windows PowerShell)
-#
-# Run from the Contribute page (the page fills in the environment), e.g.:
-#   $env:API_KEY="clw_..."; $env:PROJECT="<project-id>"; $env:COMPUTELOOP_API="https://cl.elysiavernight.com"; iex ((curl.exe -fsSL https://raw.githubusercontent.com/ComputeLoop/CLworker/master/start.ps1) -join ([char]10))
-#
-# What it does: installs Bun if missing, downloads the worker, and runs it.
-# CPU ops (image-hash, tabular-stats) need NO dependencies at all. The GPU op
-# (image-classify) loads sharp/onnxruntime on demand.
-#
-# Downloads use curl.exe (ships with Windows 10 1803+ / 11) instead of
-# Invoke-WebRequest / Invoke-RestMethod, which hang on Windows PowerShell 5.1.
-# Every download fails loudly within ~15s instead of spinning forever.
 
 $ErrorActionPreference = "Stop"
 
-if (-not $env:COMPUTELOOP_API) { throw "Set COMPUTELOOP_API to the backend URL (the Contribute page fills this in)." }
-if (-not $env:API_KEY) { throw "Register a worker on the project's Contribute page first." }
-if (-not $env:PROJECT) { throw "Set PROJECT to the project id (the Contribute page fills this in)." }
+if (-not $env:COMPUTELOOP_API) { $env:COMPUTELOOP_API = "https://cl.elysiavernight.com" }
 
-Write-Host "-> Compute Loop contributor"
+$mode = "app"
+if ($env:API_KEY -and $env:PROJECT) { $mode = "cli" }
+
+Write-Host "-> Compute Loop contributor ($mode mode)"
 Write-Host "   API server : $env:COMPUTELOOP_API"
-Write-Host "   Project    : $env:PROJECT"
+if ($mode -eq "cli") { Write-Host "   Project    : $env:PROJECT" }
 
 # --- Download helper: curl.exe first, WebClient + TLS 1.2 as fallback ---------
 function Download-File {
@@ -65,12 +54,20 @@ $src = Join-Path $temp "CLworker-master"
 if (-not (Test-Path $src)) { throw "Unexpected archive layout - expected $src" }
 Get-ChildItem $src | Move-Item -Destination $temp -Force
 
-# 3) Optional dependencies (GPU image-classify only; tolerate failure) --------
+# 3) Optional dependencies (GPU image-classify only) --------------------------
 Push-Location $temp
-bun install --ignore-scripts --no-progress 2>$null | Out-Null
+if ($env:CL_GPU -eq "1") {
+  Write-Host "-> Installing GPU op dependencies..."
+  bun install --ignore-scripts --no-progress 2>$null | Out-Null
+}
 
 # 4) Run ----------------------------------------------------------------------
-$env:WORKER_API_KEY = $env:API_KEY
-Write-Host "-> Starting worker for project $env:PROJECT (Ctrl+C to stop)..."
-bun run index.ts $env:PROJECT
+if ($mode -eq "cli") {
+  $env:WORKER_API_KEY = $env:API_KEY
+  Write-Host "-> Starting worker for project $env:PROJECT (Ctrl+C to stop)..."
+  bun run index.ts $env:PROJECT
+} else {
+  Write-Host "-> Launching contributor app..."
+  bun run index.ts
+}
 Pop-Location

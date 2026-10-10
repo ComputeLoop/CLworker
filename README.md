@@ -10,9 +10,26 @@ Contributors never execute renter code — only the ops in `worker/ops/` (mirror
 
 ## Run
 
+### Contributor app (recommended)
+
 ```bash
-bun install
-export WORKER_API_KEY="clw_<worker-key>"      # shown once when you register the worker in the web UI
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ComputeLoop/CLworker/master/start.sh)"
+```
+
+Installs Bun if needed, downloads the worker, and opens a local control panel
+in the browser (`127.0.0.1`). Paste your worker key **once** — it is stored in
+`~/.computeloop/config.json` (perms 0600), outside the worker directory — pick
+a project, press Start. Key and API URL can also be provided as env vars:
+
+```bash
+COMPUTELOOP_API="https://cl.elysiavernight.com" bun run index.ts
+```
+
+### Headless / terminal
+
+```bash
+bun install                                  # only needed for the GPU op
+export WORKER_API_KEY="clw_<worker-key>"     # shown once when you register the worker in the web UI
 export COMPUTELOOP_API="http://localhost:6767"  # backend URL (default)
 bun run index.ts <project-id>
 ```
@@ -21,12 +38,14 @@ bun run index.ts <project-id>
 
 | Env | Default | Purpose |
 | --- | --- | --- |
-| `WORKER_API_KEY` | — | required; issued once at `POST /workers/register` |
-| `COMPUTELOOP_API` | `http://localhost:6767` | backend URL |
+| `WORKER_API_KEY` | — (app stores it) | required for CLI mode; issued once at `POST /workers/register` |
+| `COMPUTELOOP_API` | CLI: `http://localhost:6767`, app: `https://cl.elysiavernight.com` | backend URL |
+| `COMPUTELOOP_UI_PORT` | free port | local app port (`0` = auto-pick) |
 | `WORKER_POLL_MS` | `2000` | idle poll interval |
 | `MODEL_PATH` | — | ONNX model for `image-classify` (GPU op) |
 | `MODEL_LABELS` | — | one class label per line, matched to output rows |
 | `USE_CUDA` | off | prefer CUDA in onnxruntime; falls back to CPU |
+| `CL_GPU` | `0` (`start.*`) | set to `1` to `bun install` GPU deps in the one-line installers |
 
 ## Ops
 
