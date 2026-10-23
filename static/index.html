@@ -317,7 +317,7 @@
     for (const project of projects) {
       const option = document.createElement("option");
       option.value = project.id;
-      option.textContent = `${project.name} · ${project.opName} · ${project.pendingJobs} pending · ${project.rewardPerChunk ?? 0} credits/chunk${project.requiresCuda ? " · NVIDIA CUDA" : ""}`;
+      option.textContent = `${project.name} · ${project.opName} · ${project.pendingJobs} pending · ${project.rewardPerChunk ?? 0} credits/chunk${project.requiresGpu ? " · NVIDIA GPU required" : ""}`;
       select.appendChild(option);
     }
     selectedProjectId = projects.some((project) => project.id === currentId) ? currentId : "";
@@ -474,7 +474,7 @@
       availableChunks = await api(`/api/projects/${encodeURIComponent(projectId)}/chunks`);
       const project = (state?.projects ?? []).find((item) => item.id === projectId);
       $("projectSummary").textContent = project
-        ? `${project.name} · ${project.opName} · ${project.rewardPerChunk ?? 0} mock credits per successful chunk${project.requiresCuda ? " · NVIDIA CUDA required" : ""}`
+        ? `${project.name} · ${project.opName} · ${project.rewardPerChunk ?? 0} mock credits per successful chunk${project.requiresGpu ? " · NVIDIA GPU required" : ""}`
         : "Pending chunks";
       renderChunkList();
     } catch (error) {

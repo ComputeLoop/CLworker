@@ -1,13 +1,3 @@
-#!/usr/bin/env bash
-# Compute Loop — one-line contributor bootstrap (macOS / Linux)
-#
-# Opens the local contributor app. Paste your worker key, choose a project,
-# select the pending chunks to run, then start the contribution.
-#
-# What it does: installs Bun if missing, downloads the worker, and runs it.
-# Detects NVIDIA CUDA and prepares image-classify automatically when possible.
-# CPU operations remain available without a supported CUDA runtime.
-
 set -euo pipefail
 
 : "${COMPUTELOOP_API:=https://cl.elysiavernight.com}"
@@ -19,14 +9,14 @@ fi
 echo "→ Compute Loop contributor"
 echo "   API server : $COMPUTELOOP_API"
 
-# 1) Bun runtime ---------------------------------------------------------------
+# 1) Bun runtime
 if ! command -v bun >/dev/null 2>&1; then
   echo "→ Bun not found, installing…"
   curl -fsSL --connect-timeout 15 --max-time 180 https://bun.sh/install | bash
 fi
 export PATH="$HOME/.bun/bin:$PATH"
 
-# 2) Worker source (fresh copy) ------------------------------------------------
+# 2) Worker source (fresh copy) 
 WORKDIR="${CL_WORKER_DIR:-$HOME/.computeloop/worker}"
 mkdir -p "$WORKDIR"
 find "$WORKDIR" -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf {} +
@@ -34,7 +24,7 @@ echo "→ Fetching worker…"
 curl -fsSL --connect-timeout 15 --max-time 180 https://github.com/ComputeLoop/CLworker/archive/refs/heads/master.tar.gz \
   | tar -xz -C "$WORKDIR" --strip-components=1
 
-# 3) Automatically prepare NVIDIA CUDA image-classify -------------------------
+# 3) Automatically prepare NVIDIA CUDA image-classify 
 if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] \
   && command -v nvidia-smi >/dev/null 2>&1 \
   && nvidia-smi --query-gpu=name --format=csv,noheader >/dev/null 2>&1; then
@@ -78,24 +68,24 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] \
         https://raw.githubusercontent.com/pytorch/hub/master/imagenet_classes.txt \
         -o "$MODEL_LABELS"
     fi
-    export USE_CUDA=1 MODEL_PATH MODEL_LABELS
+    export USE_CUDA=1 GPU_BACKEND=cuda MODEL_PATH MODEL_LABELS
     bun -e 'import { prepareImageClassifier } from "./ops/image-classify.ts"; await prepareImageClassifier({ modelPath: process.env.MODEL_PATH!, labelsPath: process.env.MODEL_LABELS });'
   ); then
     export LD_LIBRARY_PATH="$CUDA_LIB_DIR/nvidia/cu13/lib:$CUDA_LIB_DIR/nvidia/cudnn/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    export USE_CUDA=1 MODEL_PATH MODEL_LABELS
+    export USE_CUDA=1 GPU_BACKEND=cuda MODEL_PATH MODEL_LABELS
     echo "→ CUDA runtime verified; GPU projects are enabled."
   else
-    unset USE_CUDA MODEL_PATH MODEL_LABELS
+    unset USE_CUDA GPU_BACKEND MODEL_PATH MODEL_LABELS
     echo "⚠ NVIDIA GPU detected, but CUDA could not be initialized."
     echo "  CPU projects remain available; GPU projects will be rejected for this worker."
     echo "  The machine needs CUDA 13-compatible runtime libraries and cuDNN 9."
   fi
 else
-  unset USE_CUDA MODEL_PATH MODEL_LABELS
+  unset USE_CUDA GPU_BACKEND MODEL_PATH MODEL_LABELS
   echo "→ No supported NVIDIA CUDA GPU detected. CPU projects remain available; GPU projects will be rejected."
 fi
 
-# 4) Run ------------------------------------------------------------------------
+# 4) Run 
 cd "$WORKDIR"
 echo "→ Launching contributor app…"
 exec bun run index.ts

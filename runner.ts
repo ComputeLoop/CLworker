@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { absoluteUrl, detectGpuName, sha256hex } from "./ops/common";
+import { absoluteUrl, detectNvidiaGpu, sha256hex } from "./ops/common";
 import {
   runOp,
   PermanentFailure,
@@ -101,8 +101,16 @@ export function runWorker(options: RunOptions): RunHandle {
   const emit = options.emit ?? (() => {});
   const onFatal = options.onFatal ?? (() => {});
 
-  const GPU_NAME = detectGpuName();
-  let CUDA_READY = false;
+  const NVIDIA_GPU = detectNvidiaGpu();
+  const GPU_NAME = NVIDIA_GPU?.name ?? null;
+  const VRAM_MB = NVIDIA_GPU?.vramMb ?? null;
+  const configuredBackend = process.env.GPU_BACKEND;
+  const GPU_BACKEND = configuredBackend === "cuda" || configuredBackend === "directml"
+    ? configuredBackend
+    : process.env.USE_CUDA === "1"
+      ? "cuda"
+      : null;
+  let GPU_READY = false;
   const WORKER_ID = "worker-" + crypto.randomUUID();
   const controller = new AbortController();
   let fatalError = false;
@@ -110,7 +118,7 @@ export function runWorker(options: RunOptions): RunHandle {
   const log = (level: WorkerLogLevel, message: string) =>
     emit({ type: "log", level, message });
 
-  log("info", `🤖 Worker starting (${WORKER_ID})`);
+  log("info", ` Worker starting (${WORKER_ID})`);
   log("info", `   API server : ${API_BASE}`);
   log("info", `   Project    : ${PROJECT_ID}`);
   log("info", `   Selection  : ${JOB_IDS.length} selected chunk(s)`);
@@ -133,7 +141,12 @@ export function runWorker(options: RunOptions): RunHandle {
       await fetch(`${API_BASE}/workers/heartbeat`, {
         method: "POST",
         headers: authHeaders(true),
-        body: JSON.stringify({ gpuName: GPU_NAME, cudaReady: CUDA_READY }),
+        body: JSON.stringify({
+          gpuName: GPU_NAME,
+          vramMb: VRAM_MB,
+          gpuReady: GPU_READY,
+          gpuBackend: GPU_READY ? GPU_BACKEND : null,
+        }),
       });
     } catch {
      
@@ -154,7 +167,7 @@ export function runWorker(options: RunOptions): RunHandle {
       }
       if (response.status === 401) {
         const keyShape = /^clw_[A-Za-z0-9-]+_[0-9a-f]+$/i.test(API_KEY);
-        log("error", "🔑 Worker API key rejected by the server.");
+        log("error", "Worker API key rejected by the server.");
         if (!keyShape) {
           log(
             "error",
@@ -180,7 +193,7 @@ export function runWorker(options: RunOptions): RunHandle {
       if (response.status === 409) {
         const body = (await response.json().catch(() => null)) as { message?: string } | null;
         const message = body?.message ?? "This worker is not ready for this operation.";
-        log("error", `⚡ ${message}`);
+        log("error", `${message}`);
         fatalError = true;
         emit({ type: "status", status: "error", detail: message });
         controller.abort();
@@ -212,38 +225,38 @@ export function runWorker(options: RunOptions): RunHandle {
         // A transient project-list failure should not prevent CPU contributions.
       }
     }
-    const requiresCuda = project?.gpu === true;
-    const wantsCuda = process.env.USE_CUDA === "1" && Boolean(process.env.MODEL_PATH);
-    if (!requiresCuda && !wantsCuda) {
-      CUDA_READY = false;
+    const requiresGpu = project?.gpu === true;
+    const gpuSetupAvailable = GPU_BACKEND !== null && Boolean(process.env.MODEL_PATH);
+    if (!requiresGpu && !gpuSetupAvailable) {
+      GPU_READY = false;
       await heartbeat();
       return true;
     }
 
     if (!GPU_NAME) {
-      if (!requiresCuda) {
-        CUDA_READY = false;
+      if (!requiresGpu) {
+        GPU_READY = false;
         await heartbeat();
-        log("warn", "CUDA was requested but nvidia-smi did not detect an NVIDIA GPU.");
+        log("warn", "GPU acceleration is unavailable because nvidia-smi did not detect an NVIDIA GPU.");
         return true;
       }
       return failGpuPreflight(
-        "This is a GPU operation, but nvidia-smi did not detect an NVIDIA GPU. GPU Beta currently requires NVIDIA on Linux x64.",
+        "This is a GPU operation, but nvidia-smi did not detect an NVIDIA GPU.",
       );
     }
-    if (process.env.USE_CUDA !== "1") {
-      if (!requiresCuda) {
-        CUDA_READY = false;
+    if (!GPU_BACKEND) {
+      if (!requiresGpu) {
+        GPU_READY = false;
         await heartbeat();
         return true;
       }
       return failGpuPreflight(
-        "This GPU project needs a CUDA-ready worker. Restart using the Compute Loop contributor launcher so it can detect and prepare GPU support.",
+        "The contributor launcher did not prepare a supported NVIDIA GPU runtime. Restart it to retry setup.",
       );
     }
     if (!process.env.MODEL_PATH) {
-      if (!requiresCuda) {
-        CUDA_READY = false;
+      if (!requiresGpu) {
+        GPU_READY = false;
         await heartbeat();
         return true;
       }
@@ -255,28 +268,29 @@ export function runWorker(options: RunOptions): RunHandle {
       await prepareImageClassifier({
         modelPath: process.env.MODEL_PATH ?? "",
         labelsPath: process.env.MODEL_LABELS,
+        backend: GPU_BACKEND,
       });
-      CUDA_READY = true;
+      GPU_READY = true;
       await heartbeat();
-      log("info", `🟢 CUDA verified on ${GPU_NAME}; GPU work is enabled.`);
+      log("info", ` NVIDIA ${GPU_BACKEND === "cuda" ? "CUDA" : "DirectML"} inference verified on ${GPU_NAME} (${VRAM_MB ?? "VRAM unknown"} MB); GPU work is enabled.`);
       return true;
     } catch (error) {
-      if (!requiresCuda) {
-        CUDA_READY = false;
+      if (!requiresGpu) {
+        GPU_READY = false;
         await heartbeat();
-        log("warn", `CUDA is not ready; CPU operations remain available: ${error instanceof Error ? error.message : "CUDA preflight failed"}`);
+        log("warn", `NVIDIA GPU inference is not ready; CPU operations remain available: ${error instanceof Error ? error.message : "GPU preflight failed"}`);
         return true;
       }
       return failGpuPreflight(
-        error instanceof Error ? error.message : "Could not initialize the CUDA runtime.",
+        error instanceof Error ? error.message : "Could not initialize the NVIDIA GPU runtime.",
       );
     }
   }
 
   async function failGpuPreflight(message: string): Promise<boolean> {
-    CUDA_READY = false;
+    GPU_READY = false;
     await heartbeat();
-    log("error", `⚡ ${message}`);
+    log("error", ` ${message}`);
     fatalError = true;
     emit({ type: "status", status: "error", detail: "GPU runtime unavailable" });
     controller.abort();
@@ -311,7 +325,7 @@ export function runWorker(options: RunOptions): RunHandle {
     });
     log(
       "info",
-      `\n📦 [${chunkIndex}] ${chunk.projectName} · #${chunk.jobNumber} — ${chunk.opName} (${chunk.opType})`,
+      `\n[${chunkIndex}] ${chunk.projectName} · #${chunk.jobNumber} — ${chunk.opName} (${chunk.opType})`,
     );
 
     const workDir = await mkdtemp(join(tmpdir(), "computeloop-"));
@@ -333,12 +347,12 @@ export function runWorker(options: RunOptions): RunHandle {
         const dest = join(inputDir, "chunk.data");
         log(
           "info",
-          `   ⬇ rows ${chunk.input.rowStart}–${chunk.input.rowEnd} (${chunk.input.bytes} bytes, ranged download)`,
+          `   rows ${chunk.input.rowStart}–${chunk.input.rowEnd} (${chunk.input.bytes} bytes, ranged download)`,
         );
         await downloadTo(chunk.input.url ?? "", dest, chunk.input.range);
       }
 
-      log("info", `   🔬 Running ${chunk.opType}...`);
+      log("info", ` Running ${chunk.opType}...`);
       const result: OpResult = await runOp(
         chunk.opType,
         workDir,
@@ -383,12 +397,12 @@ export function runWorker(options: RunOptions): RunHandle {
       };
       log(
         "info",
-        `   ✅ ${result.summary} in ${(durationMs / 1000).toFixed(1)}s — sha256 ${outputHash.slice(0, 12)}…`,
+        `    ${result.summary} in ${(durationMs / 1000).toFixed(1)}s — sha256 ${outputHash.slice(0, 12)}…`,
       );
       if (complete.project) {
         log(
           "info",
-          `   📈 Project progress: ${complete.project.completedJobs}/${complete.project.totalJobs}`,
+          `    Project progress: ${complete.project.completedJobs}/${complete.project.totalJobs}`,
         );
         emit({
           type: "progress",
@@ -397,7 +411,7 @@ export function runWorker(options: RunOptions): RunHandle {
         });
       }
       if (complete.merge?.merged) {
-        log("info", `   🎉 All chunks complete — results merged!`);
+        log("info", `    All chunks complete — results merged!`);
       }
       emit({
         type: "chunk",
@@ -412,7 +426,7 @@ export function runWorker(options: RunOptions): RunHandle {
         error instanceof Error ? error.message.slice(0, 500) : "unknown error";
       log(
         "error",
-        `   ❌ Chunk failed${permanent ? " (permanent)" : ""}: ${reason}`,
+        `    Chunk failed${permanent ? " (permanent)" : ""}: ${reason}`,
       );
       if (permanent) {
         log(
@@ -466,7 +480,7 @@ export function runWorker(options: RunOptions): RunHandle {
         if (controller.signal.aborted) break;
         log(
           "info",
-          `🌐 Connection error: ${error instanceof Error ? error.message : error}`,
+          `Connection error: ${error instanceof Error ? error.message : error}`,
         );
       }
 
@@ -488,7 +502,7 @@ export function runWorker(options: RunOptions): RunHandle {
     finished = true;
     log(
       "error",
-      `💥 Worker crashed: ${error instanceof Error ? error.message : error}`,
+      `Worker crashed: ${error instanceof Error ? error.message : error}`,
     );
     emit({ type: "status", status: "error", detail: "worker crashed" });
     onFatal();

@@ -1,16 +1,7 @@
-/**
- * Op dispatcher. Each op receives a prepared work directory:
- *   - file-list: inputDir contains the chunk's files at their original paths
- *   - tabular:   inputDir/chunk.data holds the ranged byte slice
- * and writes one output file (JSONL or JSON) to outputPath.
- */
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { runImageHash, writeJsonl } from "./image-hash";
 import { runTabularStats } from "./tabular-stats";
-// image-classify is NOT imported eagerly: it pulls in sharp + onnxruntime-node,
-// which CPU-only contributors should never have to install. It is loaded on
-// demand (and fails with a clear PermanentFailure if the deps are missing).
 
 export interface ChunkInput {
   kind: "file-list" | "tabular";
@@ -25,13 +16,6 @@ export interface OpResult {
   outputPath: string;
 }
 
-/**
- * Thrown by ops for environment/machine problems that retrying won't fix
- * (missing dependency, missing model file, bad model). The worker reports
- * these to the backend as `permanent` so the chunk goes FAILED immediately
- * instead of burning retries, and the operator fixes the machine then uses
- * the project page's "Requeue" action.
- */
 export class PermanentFailure extends Error {}
 
 export async function runOp(
@@ -71,6 +55,11 @@ export async function runOp(
       const result = await runImageClassify(inputDir, input.items ?? [], {
         modelPath,
         labelsPath,
+        backend: process.env.GPU_BACKEND === "directml" || process.env.GPU_BACKEND === "cuda"
+          ? process.env.GPU_BACKEND
+          : process.env.USE_CUDA === "1"
+            ? "cuda"
+            : undefined,
       });
       await writeJsonl(outputPath, result.lines);
       return { summary: result.summary, outputPath };

@@ -8,8 +8,13 @@ export function absoluteUrl(base: string, url: string): string {
   return url.startsWith("http") ? url : `${base}${url}`;
 }
 
-/** Best-effort GPU name via nvidia-smi. Returns null when unavailable. */
-export function detectGpuName(): string | null {
+export interface NvidiaGpuInfo {
+  name: string;
+  vramMb: number | null;
+}
+
+/** Best-effort NVIDIA GPU details via nvidia-smi. */
+export function detectNvidiaGpu(): NvidiaGpuInfo | null {
   try {
     const result = Bun.spawnSync([
       "nvidia-smi",
@@ -17,9 +22,23 @@ export function detectGpuName(): string | null {
       "--format=csv,noheader",
     ]);
     if (result.exitCode !== 0) return null;
-    const name = result.stdout.toString().trim();
-    return name.length > 0 ? name : null;
+    const name = result.stdout.toString().split(/\r?\n/, 1)[0]?.trim() ?? "";
+    if (!name) return null;
+    const memory = Bun.spawnSync([
+      "nvidia-smi",
+      "--query-gpu=memory.total",
+      "--format=csv,noheader,nounits",
+    ]);
+    const vramMb = memory.exitCode === 0
+      ? Number.parseInt(memory.stdout.toString().split(/\r?\n/, 1)[0]?.trim() ?? "", 10)
+      : NaN;
+    return { name, vramMb: Number.isFinite(vramMb) ? vramMb : null };
   } catch {
     return null;
   }
+}
+
+/** Backwards-compatible helper for callers that only need the model name. */
+export function detectGpuName(): string | null {
+  return detectNvidiaGpu()?.name ?? null;
 }
