@@ -16,6 +16,7 @@ interface ProjectInfo {
   opType: string;
   opName: string;
   gpu: boolean;
+  requiresCuda?: boolean;
   owner: string;
   totalJobs: number;
   completedJobs: number;

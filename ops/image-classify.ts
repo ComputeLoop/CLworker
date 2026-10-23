@@ -22,47 +22,106 @@ export interface ClassifyOptions {
   inputSize?: number; // model is trained for inputSize x inputSize squares
 }
 
+type Ort = typeof import("onnxruntime-node");
+type SharpFactory = (input: string) => {
+  resize(width: number, height: number, options: { fit: "fill" }): {
+    removeAlpha(): {
+      toColourspace(colourspace: "srgb"): {
+        raw(): {
+          toBuffer(options: { resolveWithObject: true }): Promise<{
+            data: Buffer;
+            info: { channels: number };
+          }>;
+        };
+      };
+    };
+  };
+};
+
+let ortRuntime: Ort | null = null;
+let sharpRuntime: SharpFactory | null = null;
+let classifierSession: Awaited<ReturnType<Ort["InferenceSession"]["create"]>> | null = null;
+let classifierModelPath = "";
+
+async function loadRuntime() {
+  if (!ortRuntime) {
+    try {
+      ortRuntime = await import("onnxruntime-node");
+    } catch {
+      throw new PermanentFailure(
+        "image-classify requires onnxruntime-node. Install the worker's GPU dependencies.",
+      );
+    }
+  }
+  if (!sharpRuntime) {
+    try {
+      sharpRuntime = (await import("sharp")).default as unknown as SharpFactory;
+    } catch {
+      throw new PermanentFailure(
+        "image-classify requires sharp for image decoding. Install the worker's GPU dependencies.",
+      );
+    }
+  }
+  return { ort: ortRuntime, sharp: sharpRuntime };
+}
+
+async function getCudaSession(modelPath: string) {
+  if (process.env.USE_CUDA !== "1") {
+    throw new PermanentFailure(
+      "image-classify requires USE_CUDA=1. This operation will not silently run on CPU.",
+    );
+  }
+  if (!modelPath) {
+    throw new PermanentFailure(
+      "image-classify needs MODEL_PATH pointing to a compatible .onnx model file.",
+    );
+  }
+  if (classifierSession && classifierModelPath === modelPath) {
+    return { ort: ortRuntime!, session: classifierSession };
+  }
+
+  const { ort } = await loadRuntime();
+  try {
+    classifierSession = await ort.InferenceSession.create(modelPath, {
+      executionProviders: ["cuda"],
+      graphOptimizationLevel: "all",
+    });
+    classifierModelPath = modelPath;
+  } catch (error) {
+    classifierSession = null;
+    classifierModelPath = "";
+    throw new PermanentFailure(
+      `Could not initialize image-classify with NVIDIA CUDA. Check the NVIDIA driver, CUDA 13 user-space libraries required by ONNX Runtime 1.30, and MODEL_PATH. ${error instanceof Error ? error.message : ""}`.trim(),
+    );
+  }
+  return { ort, session: classifierSession };
+}
+
+/** Loads the model with CUDA before the worker is allowed to claim GPU work. */
+export async function prepareImageClassifier(options: ClassifyOptions) {
+  const { session } = await getCudaSession(options.modelPath);
+  if (session.inputNames.length === 0) {
+    throw new PermanentFailure("Image classification model declares no inputs.");
+  }
+  const inputName = session.inputNames[0];
+  if (!inputName) throw new PermanentFailure("Image classification model declares no inputs.");
+  return { inputName };
+}
+
 export async function runImageClassify(
   inputDir: string,
   items: { path: string }[],
   options: ClassifyOptions,
 ): Promise<{ lines: string[]; summary: string }> {
-  let ort: typeof import("onnxruntime-node");
-  try {
-    ort = await import("onnxruntime-node");
-  } catch {
-    throw new PermanentFailure(
-      "image-classify requires onnxruntime-node. Install it in the worker: `bun add onnxruntime-node sharp`",
-    );
-  }
-
-  let sharp: typeof import("sharp");
-  try {
-    sharp = (await import("sharp")).default as unknown as typeof import("sharp");
-  } catch {
-    throw new PermanentFailure(
-      "image-classify requires sharp for decoding: `bun add onnxruntime-node sharp`",
-    );
-  }
-
-  if (!options.modelPath) {
-    throw new PermanentFailure(
-      "image-classify needs MODEL_PATH pointing to a .onnx model file",
-    );
-  }
-
+  const { ort, sharp } = await loadRuntime();
+  const { session } = await getCudaSession(options.modelPath);
   const size = options.inputSize ?? 224;
-  const executionProviders = process.env.USE_CUDA === "1" ? ["CUDA", "cpu"] : ["cpu"];
-
-  const session = await ort.InferenceSession.create(options.modelPath, {
-    executionProviders,
-    graphOptimizationLevel: "all",
-  });
 
   if (session.inputNames.length === 0) {
     throw new Error("Model declares no inputs");
   }
   const inputName = session.inputNames[0];
+  if (!inputName) throw new PermanentFailure("Image classification model declares no inputs.");
 
   let labels: string[] | null = null;
   if (options.labelsPath) {
@@ -78,18 +137,30 @@ export async function runImageClassify(
     const pixels = await sharp(full)
       .resize(size, size, { fit: "fill" })
       .removeAlpha()
+      .toColourspace("srgb")
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    // NHWC float32, normalized to [-1, 1] (ImageNet convention).
+    // ONNX Model Zoo MobileNet v2 expects NCHW RGB, scaled to [0, 1] and
+    // normalized with ImageNet channel means and standard deviations.
     const { data, info } = pixels;
-    const float = new Float32Array(size * size * (info.channels ?? 3));
-    for (let i = 0; i < float.length; i++) {
-      float[i] = (data[i] / 255) * 2 - 1;
+    if (info.channels !== 3) {
+      throw new PermanentFailure(`Expected a 3-channel RGB image after decoding: ${item.path}`);
+    }
+    const plane = size * size;
+    const float = new Float32Array(3 * plane);
+    const means = [0.485, 0.456, 0.406];
+    const stds = [0.229, 0.224, 0.225];
+    for (let pixel = 0; pixel < plane; pixel++) {
+      for (let channel = 0; channel < 3; channel++) {
+        const scaled = data[pixel * 3 + channel]! / 255;
+        float[channel * plane + pixel] = (scaled - means[channel]!) / stds[channel]!;
+      }
     }
 
-    const feeds: Record<string, unknown> = {};
-    feeds[inputName] = float;
+    const feeds = {
+      [inputName]: new ort.Tensor("float32", float, [1, 3, size, size]),
+    };
     const outputs = await session.run(feeds);
     const logits = Object.values(outputs)[0]?.data as
       | ArrayLike<number>
@@ -98,7 +169,7 @@ export async function runImageClassify(
 
     let topIndex = 0;
     for (let i = 1; i < logits.length; i++) {
-      if (logits[i] > logits[topIndex]) topIndex = i;
+      if (logits[i]! > logits[topIndex]!) topIndex = i;
     }
     const label = labels?.[topIndex] ?? `class-${topIndex}`;
 
@@ -112,12 +183,13 @@ export async function runImageClassify(
     );
   }
 
-  return { lines, summary: `Classified ${items.length} images` };
+  return { lines, summary: `Classified ${items.length} images with CUDA` };
 }
 
 function softmaxConfidence(logits: ArrayLike<number>, index: number): number {
-  const max = Array.from(logits).reduce((a, b) => Math.max(a, b), logits[0]);
+  if (logits.length === 0) throw new Error("Model produced an empty output tensor");
+  const max = Array.from(logits).reduce((a, b) => Math.max(a, b), logits[0]!);
   let sum = 0;
-  for (let i = 0; i < logits.length; i++) sum += Math.exp(logits[i] - max);
-  return Math.exp(logits[index] - max) / sum;
+  for (let i = 0; i < logits.length; i++) sum += Math.exp(logits[i]! - max);
+  return Math.exp(logits[index]! - max) / sum;
 }

@@ -13,13 +13,16 @@
 #       bash -c "$(curl -fsSL https://raw.githubusercontent.com/ComputeLoop/CLworker/master/start.sh)"
 #
 # What it does: installs Bun if missing, downloads the worker, and runs it.
-# CPU ops (image-hash, tabular-stats) need NO dependencies at all. The GPU op
-# (image-classify) needs `bun install` — set CL_GPU=1 to install them.
+# CPU ops need no dependencies. For image-classify GPU work, set CL_GPU=1 on an
+# NVIDIA Linux x64 machine with CUDA 13 runtime libraries installed.
 
 set -euo pipefail
 
 : "${COMPUTELOOP_API:=https://cl.elysiavernight.com}"
 export COMPUTELOOP_API
+if [ -n "${COMPUTELOOP_CUDA_LIBRARY_PATH:-}" ]; then
+  export LD_LIBRARY_PATH="${COMPUTELOOP_CUDA_LIBRARY_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 
 if [ -n "${API_KEY:-}" ] && [ -n "${PROJECT:-}" ]; then
   MODE="cli"
@@ -48,9 +51,19 @@ echo "→ Fetching worker…"
 curl -fsSL --connect-timeout 15 --max-time 180 https://github.com/ComputeLoop/CLworker/archive/refs/heads/master.tar.gz \
   | tar -xz -C "$WORKDIR" --strip-components=1
 
-# 3) Optional dependencies (GPU image-classify only; tolerate failure) ---------
+# 3) Optional dependencies (NVIDIA CUDA image-classify) ------------------------
 if [ "${CL_GPU:-0}" = "1" ]; then
-  (cd "$WORKDIR" && bun install --ignore-scripts --no-progress || true)
+  if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
+    echo "ERROR: GPU image-classify currently requires Linux x86_64 with NVIDIA CUDA 13-compatible runtime libraries."
+    exit 1
+  fi
+  if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi >/dev/null 2>&1; then
+    echo "ERROR: CL_GPU=1 requires a working NVIDIA driver and nvidia-smi."
+    exit 1
+  fi
+  cd "$WORKDIR"
+  bun install --ignore-scripts --no-progress
+  ONNXRUNTIME_NODE_INSTALL=cuda12 bun ./node_modules/onnxruntime-node/script/install.js
 fi
 
 # 4) Run ------------------------------------------------------------------------

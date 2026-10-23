@@ -82,24 +82,25 @@ export function runTabularStats(
       if (!numericFlags[i]) continue;
       const value = Number(cells[i]);
       if (Number.isFinite(value)) {
-        counts[i]++;
-        sums[i] += value;
-        mins[i] = Math.min(mins[i], value);
-        maxs[i] = Math.max(maxs[i], value);
+        counts[i] = counts[i]! + 1;
+        sums[i] = sums[i]! + value;
+        mins[i] = Math.min(mins[i]!, value);
+        maxs[i] = Math.max(maxs[i]!, value);
       }
     }
   }
 
   const columns: ColumnStats[] = headerCols.map((name, i) => {
-    if (numericFlags[i]) {
-      const mean = counts[i] > 0 ? round(sums[i] / counts[i]) : null;
+    if (numericFlags[i]!) {
+      const count = counts[i]!;
+      const mean = count > 0 ? round(sums[i]! / count) : null;
       return {
         name,
         numeric: true,
-        count: counts[i],
-        sum: round(sums[i]),
-        min: round(mins[i]),
-        max: round(maxs[i]),
+        count,
+        sum: round(sums[i]!),
+        min: round(mins[i]!),
+        max: round(maxs[i]!),
         mean: mean ?? undefined,
       };
     }

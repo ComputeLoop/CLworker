@@ -38,7 +38,7 @@ function jpegSize(buf: Uint8Array): ImageSize | null {
       offset++;
       continue;
     }
-    const marker = buf[offset + 1];
+    const marker = buf[offset + 1]!;
     if (marker === 0xff) {
       offset++;
       continue;

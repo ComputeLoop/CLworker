@@ -57,8 +57,7 @@ Get-ChildItem $src | Move-Item -Destination $temp -Force
 # 3) Optional dependencies (GPU image-classify only) --------------------------
 Push-Location $temp
 if ($env:CL_GPU -eq "1") {
-  Write-Host "-> Installing GPU op dependencies..."
-  bun install --ignore-scripts --no-progress 2>$null | Out-Null
+  throw "GPU image-classify currently requires NVIDIA CUDA on Linux x64. Windows can run the CPU operations."
 }
 
 # 4) Run ----------------------------------------------------------------------

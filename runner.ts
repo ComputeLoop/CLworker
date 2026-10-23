@@ -99,6 +99,7 @@ export function runWorker(options: RunOptions): RunHandle {
   const onFatal = options.onFatal ?? (() => {});
 
   const GPU_NAME = detectGpuName();
+  let CUDA_READY = false;
   const WORKER_ID = "worker-" + crypto.randomUUID();
   const controller = new AbortController();
   let fatalError = false;
@@ -128,7 +129,7 @@ export function runWorker(options: RunOptions): RunHandle {
       await fetch(`${API_BASE}/workers/heartbeat`, {
         method: "POST",
         headers: authHeaders(true),
-        body: JSON.stringify({}),
+        body: JSON.stringify({ gpuName: GPU_NAME, cudaReady: CUDA_READY }),
       });
     } catch {
      
@@ -173,11 +174,106 @@ export function runWorker(options: RunOptions): RunHandle {
       return null;
     }
     if (response.status === 404) return null;
+    if (response.status === 409) {
+      const body = (await response.json().catch(() => null)) as { message?: string } | null;
+      const message = body?.message ?? "This worker is not ready for this operation.";
+      log("error", `⚡ ${message}`);
+      fatalError = true;
+      emit({ type: "status", status: "error", detail: message });
+      controller.abort();
+      onFatal();
+      return null;
+    }
     if (!response.ok) {
       log("warn", ` Claim returned HTTP ${response.status}`);
       return null;
     }
     return (await response.json()) as ChunkResponse;
+  }
+
+  async function preflightGpuRuntime(): Promise<boolean> {
+    let projects: { id: string; gpu?: boolean }[];
+    try {
+      const response = await fetch(`${API_BASE}/workers/projects`, {
+        headers: authHeaders(),
+      });
+      if (!response.ok) return true;
+      projects = (await response.json()) as { id: string; gpu?: boolean }[];
+    } catch {
+      return true;
+    }
+
+    const project = projects.find((item) => item.id === PROJECT_ID);
+    const requiresCuda = project?.gpu === true;
+    const wantsCuda = process.env.USE_CUDA === "1" && Boolean(process.env.MODEL_PATH);
+    if (!requiresCuda && !wantsCuda) {
+      CUDA_READY = false;
+      await heartbeat();
+      return true;
+    }
+
+    if (!GPU_NAME) {
+      if (!requiresCuda) {
+        CUDA_READY = false;
+        await heartbeat();
+        log("warn", "CUDA was requested but nvidia-smi did not detect an NVIDIA GPU.");
+        return true;
+      }
+      return failGpuPreflight(
+        "This is a GPU operation, but nvidia-smi did not detect an NVIDIA GPU. GPU Beta currently requires NVIDIA on Linux x64.",
+      );
+    }
+    if (process.env.USE_CUDA !== "1") {
+      if (!requiresCuda) {
+        CUDA_READY = false;
+        await heartbeat();
+        return true;
+      }
+      return failGpuPreflight(
+        "This is a GPU operation. Set USE_CUDA=1 and install the CUDA-enabled worker dependencies before starting it.",
+      );
+    }
+    if (!process.env.MODEL_PATH) {
+      if (!requiresCuda) {
+        CUDA_READY = false;
+        await heartbeat();
+        return true;
+      }
+      return failGpuPreflight("Set MODEL_PATH to a compatible ONNX model before starting GPU work.");
+    }
+
+    try {
+      const { prepareImageClassifier } = await import("./ops/image-classify");
+      await prepareImageClassifier({
+        modelPath: process.env.MODEL_PATH ?? "",
+        labelsPath: process.env.MODEL_LABELS,
+      });
+      CUDA_READY = true;
+      await heartbeat();
+      log("info", `🟢 CUDA verified on ${GPU_NAME}; GPU work is enabled.`);
+      return true;
+    } catch (error) {
+      if (!requiresCuda) {
+        CUDA_READY = false;
+        await heartbeat();
+        log("warn", `CUDA is not ready; CPU operations remain available: ${error instanceof Error ? error.message : "CUDA preflight failed"}`);
+        return true;
+      }
+      return failGpuPreflight(
+        error instanceof Error ? error.message : "Could not initialize the CUDA runtime.",
+      );
+    }
+  }
+
+  async function failGpuPreflight(message: string): Promise<boolean> {
+    CUDA_READY = false;
+    await heartbeat();
+    log("error", `⚡ ${message}`);
+    fatalError = true;
+    emit({ type: "status", status: "error", detail: "GPU runtime unavailable" });
+    controller.abort();
+    onFatal();
+    return false;
   }
 
   async function downloadTo(
@@ -347,6 +443,11 @@ export function runWorker(options: RunOptions): RunHandle {
   let finished = false;
   void (async () => {
     let chunkIndex = 0;
+    if (!(await preflightGpuRuntime())) {
+      finished = true;
+      clearInterval(heartbeatTimer);
+      return;
+    }
     while (!controller.signal.aborted) {
       let job: ChunkResponse | null = null;
       try {

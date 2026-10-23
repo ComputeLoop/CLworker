@@ -266,7 +266,8 @@
         const option = document.createElement("option");
         option.value = project.id;
         option.textContent =
-          project.name + " · " + project.opName + " · " + project.pendingJobs + " chunks left";
+          project.name + " · " + project.opName + " · " + project.pendingJobs + " chunks left" +
+          (project.requiresCuda ? " · NVIDIA CUDA required" : "");
         select.appendChild(option);
       }
       if (current && s.projects.some((p) => p.id === current)) {
