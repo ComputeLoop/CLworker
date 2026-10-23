@@ -24,6 +24,12 @@ interface ProjectInfo {
   rewardPerChunk: number;
 }
 
+interface ChunkInfo {
+  id: string;
+  jobNumber: number;
+  status: string;
+}
+
 let config: WorkerConfig = loadConfig();
 let runner: RunHandle | null = null;
 let completedChunks = 0;
@@ -113,6 +119,21 @@ async function fetchProjects(
   return (await response.json()) as ProjectInfo[];
 }
 
+async function fetchProjectChunks(
+  apiBase: string,
+  apiKey: string,
+  projectId: string,
+): Promise<ChunkInfo[]> {
+  const response = await fetch(
+    `${apiBase.replace(/\/$/, "")}/workers/projects/${encodeURIComponent(projectId)}/chunks`,
+    { headers: { Authorization: `Bearer ${apiKey}` } },
+  );
+  if (!response.ok) {
+    throw new Error(`List chunks failed (HTTP ${response.status})`);
+  }
+  return (await response.json()) as ChunkInfo[];
+}
+
 async function handleKey(request: Request) {
   let body: { apiKey?: string; apiBase?: string; forget?: boolean };
   try {
@@ -193,19 +214,38 @@ async function handleProjects() {
   return json(projects);
 }
 
+async function handleProjectChunks(projectId: string) {
+  if (!config.apiKey) return jsonError("Connect a worker key first.");
+  try {
+    return json(await fetchProjectChunks(
+      config.apiBase ?? DEFAULT_API_BASE,
+      config.apiKey,
+      projectId,
+    ));
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Failed to fetch chunks");
+  }
+}
+
 async function handleStart(request: Request) {
   const apiKey = config.apiKey;
   const apiBase = config.apiBase ?? DEFAULT_API_BASE;
   if (!apiKey) return jsonError("Connect a worker key first.");
   if (runner?.running) return jsonError("Worker is already running.");
 
-  let body: { projectId?: string };
+  let body: { projectId?: string; jobIds?: string[] };
   try {
-    body = (await request.json()) as { projectId?: string };
+    body = (await request.json()) as { projectId?: string; jobIds?: string[] };
   } catch {
     body = {};
   }
   const projectId = (body.projectId ?? "").trim() || undefined;
+  const jobIds = Array.isArray(body.jobIds)
+    ? [...new Set(body.jobIds.filter((id) => typeof id === "string"))]
+    : [];
+  if (!projectId) return jsonError("Choose a project first.");
+  if (jobIds.length === 0) return jsonError("Select at least one pending chunk.");
+  if (jobIds.length > 500) return jsonError("Select no more than 500 chunks at a time.");
 
   config = saveConfig({ projectId });
   completedChunks = 0;
@@ -214,10 +254,11 @@ async function handleStart(request: Request) {
     apiBase,
     apiKey,
     projectId,
+    jobIds,
     emit,
   });
 
-  return json({ ok: true, projectId });
+  return json({ ok: true, projectId, jobIds });
 }
 
 function handleStop() {
@@ -284,6 +325,9 @@ const server = Bun.serve({
         return handleEvents();
       if (request.method === "GET" && path === "/api/projects")
         return handleProjects();
+      const chunksMatch = path.match(/^\/api\/projects\/([^/]+)\/chunks$/);
+      if (request.method === "GET" && chunksMatch)
+        return handleProjectChunks(decodeURIComponent(chunksMatch[1]!));
       if (request.method === "POST" && path === "/api/key")
         return handleKey(request);
       if (request.method === "POST" && path === "/api/start")

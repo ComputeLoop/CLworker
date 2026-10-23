@@ -43,7 +43,8 @@ export interface RunHandle {
 export interface RunOptions {
   apiBase: string;
   apiKey: string;
-  projectId?: string;
+  projectId: string;
+  jobIds: string[];
   emit?: (event: WorkerEvent) => void;
   pollMs?: number;
   waitMs?: number;
@@ -93,7 +94,8 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
 export function runWorker(options: RunOptions): RunHandle {
   const API_BASE = options.apiBase.replace(/\/$/, "");
   const API_KEY = options.apiKey;
-  const PROJECT_ID = options.projectId ?? "";
+  const PROJECT_ID = options.projectId;
+  const JOB_IDS = options.jobIds;
   const POLL_INTERVAL_MS = options.pollMs ?? Number(process.env.WORKER_POLL_MS ?? 2000);
   const WAIT_MS = options.waitMs ?? 3000;
   const emit = options.emit ?? (() => {});
@@ -110,7 +112,8 @@ export function runWorker(options: RunOptions): RunHandle {
 
   log("info", `🤖 Worker starting (${WORKER_ID})`);
   log("info", `   API server : ${API_BASE}`);
-  log("info", `   Work source: ${PROJECT_ID || "Compute Loop network queue"}`);
+  log("info", `   Project    : ${PROJECT_ID}`);
+  log("info", `   Selection  : ${JOB_IDS.length} selected chunk(s)`);
   log(
     "info",
     `   GPU        : ${GPU_NAME ?? "none detected (CPU only ops usable)"}`,
@@ -138,61 +141,60 @@ export function runWorker(options: RunOptions): RunHandle {
   }
 
   async function claimChunk(): Promise<ChunkResponse | null> {
-    const claimUrl = PROJECT_ID
-      ? `${API_BASE}/chunks/next?projectId=${encodeURIComponent(PROJECT_ID)}`
-      : `${API_BASE}/chunks/next`;
-    const response = await fetch(claimUrl, {
-      headers: authHeaders(),
-      signal: controller.signal,
-    });
-    if (response.status === 401) {
-      const keyShape = /^clw_[A-Za-z0-9-]+_[0-9a-f]+$/i.test(API_KEY);
-      log("error", "🔑 Worker API key rejected by the server.");
-      if (!keyShape) {
-        log(
-          "error",
-          `   The key doesn't look like a valid key: "${API_KEY.slice(0, 20)}…"`,
-        );
-        log(
-          "error",
-          "   Expected format: clw_<workerId>_<secret>. Make sure there is no stray space/newline",
-        );
-      } else {
-        log(
-          "error",
-          `   Key ${API_KEY.slice(0, 14)}… was rejected (stale, truncated, or never registered).`,
-        );
+    while (selectedJobIndex < JOB_IDS.length) {
+      const selectedJobId = JOB_IDS[selectedJobIndex]!;
+      const claimUrl = `${API_BASE}/chunks/next?projectId=${encodeURIComponent(PROJECT_ID)}&jobId=${encodeURIComponent(selectedJobId)}`;
+      const response = await fetch(claimUrl, {
+        headers: authHeaders(),
+        signal: controller.signal,
+      });
+      if (response.status === 404) {
+        selectedJobIndex += 1;
+        continue;
       }
-      log(
-        "error",
-        "   Fix: open the project's Contribute page and re-register this machine,",
-      );
-      log(
-        "error",
-        "   then use the exact WORKER_API_KEY command it shows.",
-      );
-      fatalError = true;
-      emit({ type: "status", status: "error", detail: "worker key rejected" });
-      controller.abort();
-      onFatal();
-      return null;
+      if (response.status === 401) {
+        const keyShape = /^clw_[A-Za-z0-9-]+_[0-9a-f]+$/i.test(API_KEY);
+        log("error", "🔑 Worker API key rejected by the server.");
+        if (!keyShape) {
+          log(
+            "error",
+            `   The key doesn't look like a valid key: "${API_KEY.slice(0, 20)}…"`,
+          );
+          log(
+            "error",
+            "   Expected format: clw_<workerId>_<secret>. Make sure there is no stray space/newline",
+          );
+        } else {
+          log(
+            "error",
+            `   Key ${API_KEY.slice(0, 14)}… was rejected (stale, truncated, or never registered).`,
+          );
+        }
+        log("error", "   Fix: re-register this machine on a project's Contribute page.");
+        fatalError = true;
+        emit({ type: "status", status: "error", detail: "worker key rejected" });
+        controller.abort();
+        onFatal();
+        return null;
+      }
+      if (response.status === 409) {
+        const body = (await response.json().catch(() => null)) as { message?: string } | null;
+        const message = body?.message ?? "This worker is not ready for this operation.";
+        log("error", `⚡ ${message}`);
+        fatalError = true;
+        emit({ type: "status", status: "error", detail: message });
+        controller.abort();
+        onFatal();
+        return null;
+      }
+      if (!response.ok) {
+        log("warn", ` Claim returned HTTP ${response.status}`);
+        return null;
+      }
+      selectedJobIndex += 1;
+      return (await response.json()) as ChunkResponse;
     }
-    if (response.status === 404) return null;
-    if (response.status === 409) {
-      const body = (await response.json().catch(() => null)) as { message?: string } | null;
-      const message = body?.message ?? "This worker is not ready for this operation.";
-      log("error", `⚡ ${message}`);
-      fatalError = true;
-      emit({ type: "status", status: "error", detail: message });
-      controller.abort();
-      onFatal();
-      return null;
-    }
-    if (!response.ok) {
-      log("warn", ` Claim returned HTTP ${response.status}`);
-      return null;
-    }
-    return (await response.json()) as ChunkResponse;
+    return null;
   }
 
   async function preflightGpuRuntime(): Promise<boolean> {
@@ -447,6 +449,7 @@ export function runWorker(options: RunOptions): RunHandle {
   const heartbeatTimer = setInterval(heartbeat, 15_000);
 
   let finished = false;
+  let selectedJobIndex = 0;
   void (async () => {
     let chunkIndex = 0;
     if (!(await preflightGpuRuntime())) {
@@ -471,8 +474,9 @@ export function runWorker(options: RunOptions): RunHandle {
         chunkIndex += 1;
         await processChunk(chunkIndex, job);
       } else if (!controller.signal.aborted) {
+        if (selectedJobIndex >= JOB_IDS.length) break;
         emit({ type: "status", status: "idle" });
-        log("info", "📭 No chunks available. Waiting...");
+        log("info", "📭 Selected chunks are temporarily unavailable. Waiting...");
         await delay(WAIT_MS, controller.signal);
       }
     }

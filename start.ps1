@@ -3,12 +3,8 @@ $ErrorActionPreference = "Stop"
 
 if (-not $env:COMPUTELOOP_API) { $env:COMPUTELOOP_API = "https://cl.elysiavernight.com" }
 
-$mode = "app"
-if ($env:API_KEY -and $env:PROJECT) { $mode = "cli" }
-
-Write-Host "-> Compute Loop contributor ($mode mode)"
+Write-Host "-> Compute Loop contributor"
 Write-Host "   API server : $env:COMPUTELOOP_API"
-if ($mode -eq "cli") { Write-Host "   Project    : $env:PROJECT" }
 
 # --- Download helper: curl.exe first, WebClient + TLS 1.2 as fallback ---------
 function Download-File {
@@ -73,12 +69,6 @@ if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
 }
 
 # 4) Run ----------------------------------------------------------------------
-if ($mode -eq "cli") {
-  $env:WORKER_API_KEY = $env:API_KEY
-  Write-Host "-> Starting worker for project $env:PROJECT (Ctrl+C to stop)..."
-  bun run index.ts $env:PROJECT
-} else {
-  Write-Host "-> Launching contributor app..."
-  bun run index.ts
-}
+Write-Host "-> Launching contributor app..."
+bun run index.ts
 Pop-Location

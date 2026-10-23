@@ -108,6 +108,11 @@
 
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
   .row select { flex: 1 1 320px; width: auto; margin-top: 0; }
+  .chunk-list { max-height: 260px; overflow: auto; border: 1px solid #e7e7e3; border-radius: 10px; background: #fff; }
+  .chunk-option { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #f0f0ed; margin: 0; font-size: 13.5px; font-weight: 500; }
+  .chunk-option:last-child { border-bottom: 0; }
+  .chunk-option input { accent-color: #1c1c1f; }
+  .selection-count { color: #777773; font-size: 13px; }
   .stat { font-size: 13.5px; color: #777773; margin-left: auto; }
   .stat strong { color: #1c1c1f; font-size: 15px; }
 
@@ -143,8 +148,8 @@
     <div class="card-head"><span class="step">1</span> Connect your machine</div>
     <p class="hint">
       Register this machine once on a project's <strong>Contribute</strong> page,
-      then paste the one-time key here. This client automatically finds eligible
-      work across the contributor network; you do not attach to projects one by one.
+      then paste the one-time key here. Choose a project and the exact pending
+      chunks you want this machine to process.
     </p>
     <form id="keyForm">
       <label>Worker API key
@@ -165,22 +170,33 @@
 
   <!-- 2 · Work -->
   <section class="card" id="workCard" hidden>
-    <div class="card-head"><span class="step">2</span> Join the contributor network</div>
+    <div class="card-head"><span class="step">2</span> Choose a project and chunks</div>
     <p class="hint" id="connectedAs">&nbsp;</p>
     <div class="row">
-      <div class="hint" id="availableWork">Checking available projects&hellip;</div>
+      <select id="projectSelect" aria-label="Choose a project">
+        <option value="">Loading projects&hellip;</option>
+      </select>
       <button class="ghost" id="refreshBtn" title="Refresh project list">&#10227; Refresh</button>
     </div>
+    <p class="hint" id="projectSummary">Select a project to see its pending chunks.</p>
     <div class="row">
-      <button class="primary" id="startBtn">Start contributing</button>
+      <strong>Pending chunks</strong>
+      <button class="ghost" id="selectAllBtn" type="button">Select all</button>
+      <button class="ghost" id="selectNoneBtn" type="button">Clear</button>
+      <span class="selection-count" id="selectionCount">0 selected</span>
+    </div>
+    <div class="chunk-list" id="chunkList" aria-live="polite">
+      <p class="hint" style="padding:10px 12px">Select a project to load its chunks.</p>
+    </div>
+    <div class="row">
+      <button class="primary" id="startBtn">Run selected chunks</button>
       <button class="danger" id="stopBtn" hidden>Stop</button>
       <span class="stat">Chunks this run: <strong id="chunkCount">0</strong></span>
       <span class="stat">Credits earned: <strong id="creditsEarned">0</strong></span>
     </div>
     <p class="hint" style="margin-top:12px">
-      The client automatically picks eligible work from the network. Stopping
-      finishes the chunk already running first. It only runs platform-approved
-      operations — never renter code.
+      Only the chunks you select will be attempted. Stopping finishes the chunk
+      already running first. This client runs platform-approved operations — never renter code.
     </p>
     <p class="error" id="workError" hidden></p>
     <div class="row">
@@ -206,6 +222,9 @@
   let eventSource = null;
   let pollTimer = null;
   let state = null;
+  let selectedProjectId = "";
+  let availableChunks = [];
+  const selectedChunkIds = new Set();
 
   async function api(path, options) {
     const response = await fetch(path, options);
@@ -260,19 +279,14 @@
         "Connected as " + s.worker.name + " · " + s.apiBase;
     }
 
-    if (s.projects && s.projects.length) {
-      const projects = s.projects.map((project) =>
-        `<div class="line">${escapeHtml(project.name)} · ${escapeHtml(project.opName)} · ${project.pendingJobs} chunks · ${project.rewardPerChunk ?? 0} credits/chunk${project.requiresCuda ? " · NVIDIA CUDA" : ""}</div>`,
-      ).join("");
-      $("availableWork").innerHTML = `<strong>Available network work</strong>${projects}`;
-    } else if (s.configured) {
-      $("availableWork").innerHTML = "No queued work right now. Keep contributing enabled and this client will pick up new eligible tasks automatically.";
-    }
-
     $("refreshBtn").disabled = s.running;
+    $("projectSelect").disabled = s.running;
+    $("selectAllBtn").disabled = s.running || availableChunks.length === 0;
+    $("selectNoneBtn").disabled = s.running || selectedChunkIds.size === 0;
+    for (const checkbox of $("chunkList").querySelectorAll("input[type=checkbox]")) checkbox.disabled = s.running;
     $("startBtn").hidden = s.running;
     $("stopBtn").hidden = !s.running;
-    $("startBtn").disabled = false;
+    $("startBtn").disabled = s.running || !selectedProjectId || selectedChunkIds.size === 0;
 
     renderPill(s.status, s.running, s.statusDetail);
 
@@ -288,6 +302,72 @@
     return String(value).replace(/[&<>\"']/g, (character) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
     })[character]);
+  }
+
+  function renderProjects() {
+    const select = $("projectSelect");
+    const projects = state?.projects ?? [];
+    const currentId = selectedProjectId || state?.projectId || "";
+    select.replaceChildren();
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = projects.length ? "Choose a project" : "No projects with pending chunks";
+    select.appendChild(placeholder);
+    for (const project of projects) {
+      const option = document.createElement("option");
+      option.value = project.id;
+      option.textContent = `${project.name} · ${project.opName} · ${project.pendingJobs} pending · ${project.rewardPerChunk ?? 0} credits/chunk${project.requiresCuda ? " · NVIDIA CUDA" : ""}`;
+      select.appendChild(option);
+    }
+    selectedProjectId = projects.some((project) => project.id === currentId) ? currentId : "";
+    select.value = selectedProjectId;
+    if (selectedProjectId) void loadProjectChunks(selectedProjectId);
+    else {
+      availableChunks = [];
+      selectedChunkIds.clear();
+      renderChunkList();
+      $("projectSummary").textContent = "Choose a project to see available chunks.";
+    }
+  }
+
+  function renderChunkList() {
+    const list = $("chunkList");
+    list.replaceChildren();
+    if (!availableChunks.length) {
+      const empty = document.createElement("p");
+      empty.className = "hint";
+      empty.style.padding = "10px 12px";
+      empty.textContent = selectedProjectId ? "No pending chunks are available for this project." : "Select a project to load its chunks.";
+      list.appendChild(empty);
+    } else {
+      for (const chunk of availableChunks) {
+        const label = document.createElement("label");
+        label.className = "chunk-option";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = chunk.id;
+        checkbox.checked = selectedChunkIds.has(chunk.id);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) selectedChunkIds.add(chunk.id);
+          else selectedChunkIds.delete(chunk.id);
+          updateSelectionCount();
+        });
+        const text = document.createElement("span");
+        text.textContent = `Chunk ${chunk.jobNumber}`;
+        label.append(checkbox, text);
+        list.appendChild(label);
+      }
+    }
+    updateSelectionCount();
+  }
+
+  function updateSelectionCount() {
+    const availableIds = new Set(availableChunks.map((chunk) => chunk.id));
+    for (const id of selectedChunkIds) if (!availableIds.has(id)) selectedChunkIds.delete(id);
+    $("selectionCount").textContent = `${selectedChunkIds.size} selected`;
+    $("selectAllBtn").disabled = state?.running || availableChunks.length === 0;
+    $("selectNoneBtn").disabled = state?.running || selectedChunkIds.size === 0;
+    $("startBtn").disabled = state?.running || !selectedProjectId || selectedChunkIds.size === 0;
   }
 
   function showError(id, message) {
@@ -380,14 +460,46 @@
       const list = await api("/api/projects");
       state = state || {};
       state.projects = list;
-      state.projectId = state.projectId || (list[0] && list[0].id) || null;
+      renderProjects();
       render(state);
     } catch (error) {
       showError("workError", error.message);
     }
   }
 
-  $("refreshBtn").addEventListener("click", loadProjects);
+  async function loadProjectChunks(projectId) {
+    if (!projectId) return;
+    try {
+      availableChunks = await api(`/api/projects/${encodeURIComponent(projectId)}/chunks`);
+      const project = (state?.projects ?? []).find((item) => item.id === projectId);
+      $("projectSummary").textContent = project
+        ? `${project.name} · ${project.opName} · ${project.rewardPerChunk ?? 0} mock credits per successful chunk${project.requiresCuda ? " · NVIDIA CUDA required" : ""}`
+        : "Pending chunks";
+      renderChunkList();
+    } catch (error) {
+      showError("workError", error.message);
+    }
+  }
+
+  $("projectSelect").addEventListener("change", () => {
+    selectedProjectId = $("projectSelect").value;
+    selectedChunkIds.clear();
+    availableChunks = [];
+    renderChunkList();
+    if (selectedProjectId) void loadProjectChunks(selectedProjectId);
+  });
+  $("selectAllBtn").addEventListener("click", () => {
+    for (const chunk of availableChunks) selectedChunkIds.add(chunk.id);
+    renderChunkList();
+  });
+  $("selectNoneBtn").addEventListener("click", () => {
+    selectedChunkIds.clear();
+    renderChunkList();
+  });
+  $("refreshBtn").addEventListener("click", async () => {
+    await loadProjects();
+    if (selectedProjectId) await loadProjectChunks(selectedProjectId);
+  });
 
   $("startBtn").addEventListener("click", async () => {
     hideError("workError");
@@ -395,7 +507,10 @@
       await api("/api/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          projectId: selectedProjectId,
+          jobIds: [...selectedChunkIds],
+        }),
       });
       appendLog("▶ Worker started", null);
       await loadState();
@@ -436,12 +551,10 @@
   (async () => {
     const loaded = await loadState();
     connectEvents();
-    if (loaded && loaded.configured) {
-      if (!loaded.projects || !loaded.projects.length) await loadProjects();
-    }
+    if (loaded && loaded.configured) await loadProjects();
     pollTimer = setInterval(loadState, 2500);
     setInterval(() => {
-      if (state && state.configured) void loadProjects();
+      if (state && state.configured && !state.running) void loadProjects();
     }, 10000);
   })();
 </script>

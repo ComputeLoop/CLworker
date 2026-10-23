@@ -1,16 +1,8 @@
 #!/usr/bin/env bash
 # Compute Loop — one-line contributor bootstrap (macOS / Linux)
 #
-# Two ways to run it:
-#
-# A) Contributor app (recommended, no editing):
-#     bash -c "$(curl -fsSL https://raw.githubusercontent.com/ComputeLoop/CLworker/master/start.sh)"
-#   Opens the local app in your browser. Paste your worker key once, pick a
-#   project from the dropdown, press Start. The key is remembered.
-#
-# B) Headless / CI (key + project baked in, runs in the terminal):
-#     API_KEY=clw_... PROJECT=<project-id> COMPUTELOOP_API=https://cl.elysiavernight.com \
-#       bash -c "$(curl -fsSL https://raw.githubusercontent.com/ComputeLoop/CLworker/master/start.sh)"
+# Opens the local contributor app. Paste your worker key, choose a project,
+# select the pending chunks to run, then start the contribution.
 #
 # What it does: installs Bun if missing, downloads the worker, and runs it.
 # Detects NVIDIA CUDA and prepares image-classify automatically when possible.
@@ -24,17 +16,8 @@ if [ -n "${COMPUTELOOP_CUDA_LIBRARY_PATH:-}" ]; then
   export LD_LIBRARY_PATH="${COMPUTELOOP_CUDA_LIBRARY_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 
-if [ -n "${API_KEY:-}" ] && [ -n "${PROJECT:-}" ]; then
-  MODE="cli"
-else
-  MODE="app"
-fi
-
-echo "→ Compute Loop contributor ($MODE mode)"
+echo "→ Compute Loop contributor"
 echo "   API server : $COMPUTELOOP_API"
-if [ "$MODE" = "cli" ]; then
-  echo "   Project    : $PROJECT"
-fi
 
 # 1) Bun runtime ---------------------------------------------------------------
 if ! command -v bun >/dev/null 2>&1; then
@@ -114,11 +97,5 @@ fi
 
 # 4) Run ------------------------------------------------------------------------
 cd "$WORKDIR"
-if [ "$MODE" = "cli" ]; then
-  export WORKER_API_KEY="$API_KEY"
-  echo "→ Starting worker for project $PROJECT (Ctrl+C to stop)…"
-  exec bun run index.ts "$PROJECT"
-else
-  echo "→ Launching contributor app…"
-  exec bun run index.ts
-fi
+echo "→ Launching contributor app…"
+exec bun run index.ts
