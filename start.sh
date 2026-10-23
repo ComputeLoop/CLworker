@@ -13,8 +13,8 @@
 #       bash -c "$(curl -fsSL https://raw.githubusercontent.com/ComputeLoop/CLworker/master/start.sh)"
 #
 # What it does: installs Bun if missing, downloads the worker, and runs it.
-# CPU ops need no dependencies. For image-classify GPU work, set CL_GPU=1 on an
-# NVIDIA Linux x64 machine with CUDA 13 runtime libraries installed.
+# Detects NVIDIA CUDA and prepares image-classify automatically when possible.
+# CPU operations remain available without a supported CUDA runtime.
 
 set -euo pipefail
 
@@ -45,25 +45,53 @@ export PATH="$HOME/.bun/bin:$PATH"
 
 # 2) Worker source (fresh copy) ------------------------------------------------
 WORKDIR="${CL_WORKER_DIR:-$HOME/.computeloop/worker}"
-rm -rf "$WORKDIR"
 mkdir -p "$WORKDIR"
+find "$WORKDIR" -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf {} +
 echo "→ Fetching worker…"
 curl -fsSL --connect-timeout 15 --max-time 180 https://github.com/ComputeLoop/CLworker/archive/refs/heads/master.tar.gz \
   | tar -xz -C "$WORKDIR" --strip-components=1
 
-# 3) Optional dependencies (NVIDIA CUDA image-classify) ------------------------
-if [ "${CL_GPU:-0}" = "1" ]; then
-  if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
-    echo "ERROR: GPU image-classify currently requires Linux x86_64 with NVIDIA CUDA 13-compatible runtime libraries."
-    exit 1
+# 3) Automatically prepare NVIDIA CUDA image-classify -------------------------
+if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] \
+  && command -v nvidia-smi >/dev/null 2>&1 \
+  && nvidia-smi --query-gpu=name --format=csv,noheader >/dev/null 2>&1; then
+  GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n 1 | xargs)"
+  MODEL_DIR="$HOME/.computeloop/models"
+  MODEL_PATH="$MODEL_DIR/mobilenetv2-12.onnx"
+  MODEL_LABELS="$MODEL_DIR/imagenet-classes.txt"
+  mkdir -p "$MODEL_DIR"
+  echo "→ NVIDIA GPU detected: $GPU_NAME"
+  echo "→ Preparing GPU runtime (first run downloads dependencies and model)…"
+
+  if (
+    set -e
+    cd "$WORKDIR"
+    bun install --ignore-scripts --no-progress
+    ONNXRUNTIME_NODE_INSTALL=cuda12 bun ./node_modules/onnxruntime-node/script/install.js
+    if [ ! -s "$MODEL_PATH" ]; then
+      curl -fL --retry 3 --connect-timeout 20 \
+        https://github.com/onnx/models/raw/refs/heads/main/validated/vision/classification/mobilenet/model/mobilenetv2-12.onnx \
+        -o "$MODEL_PATH"
+    fi
+    if [ ! -s "$MODEL_LABELS" ]; then
+      curl -fL --retry 3 --connect-timeout 20 \
+        https://raw.githubusercontent.com/pytorch/hub/master/imagenet_classes.txt \
+        -o "$MODEL_LABELS"
+    fi
+    export USE_CUDA=1 MODEL_PATH MODEL_LABELS
+    bun -e 'import { prepareImageClassifier } from "./ops/image-classify.ts"; await prepareImageClassifier({ modelPath: process.env.MODEL_PATH!, labelsPath: process.env.MODEL_LABELS });'
+  ); then
+    export USE_CUDA=1 MODEL_PATH MODEL_LABELS
+    echo "→ CUDA runtime verified; GPU projects are enabled."
+  else
+    unset USE_CUDA MODEL_PATH MODEL_LABELS
+    echo "⚠ NVIDIA GPU detected, but CUDA could not be initialized."
+    echo "  CPU projects remain available; GPU projects will be rejected for this worker."
+    echo "  The machine needs CUDA 13-compatible runtime libraries and cuDNN 9."
   fi
-  if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi >/dev/null 2>&1; then
-    echo "ERROR: CL_GPU=1 requires a working NVIDIA driver and nvidia-smi."
-    exit 1
-  fi
-  cd "$WORKDIR"
-  bun install --ignore-scripts --no-progress
-  ONNXRUNTIME_NODE_INSTALL=cuda12 bun ./node_modules/onnxruntime-node/script/install.js
+else
+  unset USE_CUDA MODEL_PATH MODEL_LABELS
+  echo "→ No supported NVIDIA CUDA GPU detected. CPU projects remain available; GPU projects will be rejected."
 fi
 
 # 4) Run ------------------------------------------------------------------------

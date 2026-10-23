@@ -230,7 +230,7 @@ export function runWorker(options: RunOptions): RunHandle {
         return true;
       }
       return failGpuPreflight(
-        "This is a GPU operation. Set USE_CUDA=1 and install the CUDA-enabled worker dependencies before starting it.",
+        "This GPU project needs a CUDA-ready worker. Restart using the Compute Loop contributor launcher so it can detect and prepare GPU support.",
       );
     }
     if (!process.env.MODEL_PATH) {
@@ -239,7 +239,7 @@ export function runWorker(options: RunOptions): RunHandle {
         await heartbeat();
         return true;
       }
-      return failGpuPreflight("Set MODEL_PATH to a compatible ONNX model before starting GPU work.");
+      return failGpuPreflight("The contributor launcher could not prepare the image-classification model. Restart the launcher to retry setup.");
     }
 
     try {

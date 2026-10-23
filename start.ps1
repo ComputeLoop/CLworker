@@ -54,10 +54,22 @@ $src = Join-Path $temp "CLworker-master"
 if (-not (Test-Path $src)) { throw "Unexpected archive layout - expected $src" }
 Get-ChildItem $src | Move-Item -Destination $temp -Force
 
-# 3) Optional dependencies (GPU image-classify only) --------------------------
+# 3) Detect GPU capability -----------------------------------------------------
 Push-Location $temp
-if ($env:CL_GPU -eq "1") {
-  throw "GPU image-classify currently requires NVIDIA CUDA on Linux x64. Windows can run the CPU operations."
+if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+  try {
+    $gpuName = (& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -eq 0 -and $gpuName) {
+      Write-Host "-> NVIDIA GPU detected: $gpuName"
+      Write-Host "-> GPU image classification is not supported by this Windows worker yet; CPU projects remain available."
+    } else {
+      Write-Host "-> No supported CUDA GPU detected. CPU projects remain available; GPU projects will be rejected."
+    }
+  } catch {
+    Write-Host "-> No supported CUDA GPU detected. CPU projects remain available; GPU projects will be rejected."
+  }
+} else {
+  Write-Host "-> No supported CUDA GPU detected. CPU projects remain available; GPU projects will be rejected."
 }
 
 # 4) Run ----------------------------------------------------------------------
