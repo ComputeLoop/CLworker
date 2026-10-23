@@ -98,6 +98,7 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] \
     export USE_CUDA=1 MODEL_PATH MODEL_LABELS
     bun -e 'import { prepareImageClassifier } from "./ops/image-classify.ts"; await prepareImageClassifier({ modelPath: process.env.MODEL_PATH!, labelsPath: process.env.MODEL_LABELS });'
   ); then
+    export LD_LIBRARY_PATH="$CUDA_LIB_DIR/nvidia/cu13/lib:$CUDA_LIB_DIR/nvidia/cudnn/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     export USE_CUDA=1 MODEL_PATH MODEL_LABELS
     echo "→ CUDA runtime verified; GPU projects are enabled."
   else
