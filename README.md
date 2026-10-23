@@ -50,10 +50,12 @@ bun run index.ts <project-id>
 
 The Beta GPU path currently targets NVIDIA GPUs on Linux x64. The one-paste
 launcher detects the GPU, installs ONNX Runtime's CUDA provider, downloads the
-model and labels, and validates CUDA before opening the app. A machine without a
-working CUDA runtime remains usable for CPU operations, but cannot claim GPU
-classification chunks. ONNX Runtime 1.30 requires CUDA 13-compatible user-space
-libraries and cuDNN 9. Windows GPU execution is not supported by this worker yet.
+model and labels, and validates CUDA before opening the app. If system CUDA
+libraries are missing, it installs the required CUDA 13/cuDNN 9 runtime locally
+under `~/.computeloop/cuda-libs`; this first-time setup can download about 1.6 GB.
+A machine without a supported CUDA GPU remains usable for CPU operations, but
+cannot claim GPU-classification chunks. Windows GPU execution is not supported
+by this worker yet.
 
 ## Ops
 

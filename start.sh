@@ -57,6 +57,7 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] \
   && nvidia-smi --query-gpu=name --format=csv,noheader >/dev/null 2>&1; then
   GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n 1 | xargs)"
   MODEL_DIR="$HOME/.computeloop/models"
+  CUDA_LIB_DIR="$HOME/.computeloop/cuda-libs"
   MODEL_PATH="$MODEL_DIR/mobilenetv2-12.onnx"
   MODEL_LABELS="$MODEL_DIR/imagenet-classes.txt"
   mkdir -p "$MODEL_DIR"
@@ -68,6 +69,22 @@ if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] \
     cd "$WORKDIR"
     bun install --ignore-scripts --no-progress
     ONNXRUNTIME_NODE_INSTALL=cuda12 bun ./node_modules/onnxruntime-node/script/install.js
+    if [ ! -s "$CUDA_LIB_DIR/nvidia/cu13/lib/libcublasLt.so.13" ] \
+      || [ ! -s "$CUDA_LIB_DIR/nvidia/cu13/lib/libcudart.so.13" ] \
+      || [ ! -s "$CUDA_LIB_DIR/nvidia/cu13/lib/libcurand.so.10" ] \
+      || [ ! -s "$CUDA_LIB_DIR/nvidia/cudnn/lib/libcudnn.so.9" ]; then
+      if ! command -v python3 >/dev/null 2>&1; then
+        echo "Python 3 is needed to install the missing CUDA runtime libraries."
+        exit 1
+      fi
+      echo "→ Installing CUDA 13 and cuDNN runtime libraries into ~/.computeloop (first setup may download about 1.6 GB)…"
+      python3 -m pip install --disable-pip-version-check --no-deps --target "$CUDA_LIB_DIR" \
+        'nvidia-cublas==13.4.2.4' \
+        'nvidia-cuda-runtime==13.4.92' \
+        'nvidia-curand==10.4.4.72' \
+        'nvidia-cudnn-cu13==9.27.0.42'
+    fi
+    export LD_LIBRARY_PATH="$CUDA_LIB_DIR/nvidia/cu13/lib:$CUDA_LIB_DIR/nvidia/cudnn/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     if [ ! -s "$MODEL_PATH" ]; then
       curl -fL --retry 3 --connect-timeout 20 \
         https://github.com/onnx/models/raw/refs/heads/main/validated/vision/classification/mobilenet/model/mobilenetv2-12.onnx \

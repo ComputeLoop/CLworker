@@ -258,6 +258,7 @@ function handleEvents() {
 const server = Bun.serve({
   hostname: HOST,
   port: PORT,
+  idleTimeout: 255,
   fetch(request) {
     const path = new URL(request.url).pathname;
     try {
