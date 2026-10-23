@@ -43,7 +43,7 @@ export interface RunHandle {
 export interface RunOptions {
   apiBase: string;
   apiKey: string;
-  projectId: string;
+  projectId?: string;
   emit?: (event: WorkerEvent) => void;
   pollMs?: number;
   waitMs?: number;
@@ -54,6 +54,7 @@ export interface RunOptions {
 interface ChunkResponse {
   id: string;
   projectId: string;
+  projectName: string;
   jobNumber: number;
   status: string;
   workerId: string;
@@ -92,7 +93,7 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
 export function runWorker(options: RunOptions): RunHandle {
   const API_BASE = options.apiBase.replace(/\/$/, "");
   const API_KEY = options.apiKey;
-  const PROJECT_ID = options.projectId;
+  const PROJECT_ID = options.projectId ?? "";
   const POLL_INTERVAL_MS = options.pollMs ?? Number(process.env.WORKER_POLL_MS ?? 2000);
   const WAIT_MS = options.waitMs ?? 3000;
   const emit = options.emit ?? (() => {});
@@ -109,7 +110,7 @@ export function runWorker(options: RunOptions): RunHandle {
 
   log("info", `🤖 Worker starting (${WORKER_ID})`);
   log("info", `   API server : ${API_BASE}`);
-  log("info", `   Project    : ${PROJECT_ID}`);
+  log("info", `   Work source: ${PROJECT_ID || "Compute Loop network queue"}`);
   log(
     "info",
     `   GPU        : ${GPU_NAME ?? "none detected (CPU only ops usable)"}`,
@@ -137,10 +138,13 @@ export function runWorker(options: RunOptions): RunHandle {
   }
 
   async function claimChunk(): Promise<ChunkResponse | null> {
-    const response = await fetch(
-      `${API_BASE}/chunks/next?projectId=${encodeURIComponent(PROJECT_ID)}`,
-      { headers: authHeaders(), signal: controller.signal },
-    );
+    const claimUrl = PROJECT_ID
+      ? `${API_BASE}/chunks/next?projectId=${encodeURIComponent(PROJECT_ID)}`
+      : `${API_BASE}/chunks/next`;
+    const response = await fetch(claimUrl, {
+      headers: authHeaders(),
+      signal: controller.signal,
+    });
     if (response.status === 401) {
       const keyShape = /^clw_[A-Za-z0-9-]+_[0-9a-f]+$/i.test(API_KEY);
       log("error", "🔑 Worker API key rejected by the server.");
@@ -192,18 +196,20 @@ export function runWorker(options: RunOptions): RunHandle {
   }
 
   async function preflightGpuRuntime(): Promise<boolean> {
-    let projects: { id: string; gpu?: boolean }[];
-    try {
-      const response = await fetch(`${API_BASE}/workers/projects`, {
-        headers: authHeaders(),
-      });
-      if (!response.ok) return true;
-      projects = (await response.json()) as { id: string; gpu?: boolean }[];
-    } catch {
-      return true;
+    let project: { id: string; gpu?: boolean } | undefined;
+    if (PROJECT_ID) {
+      try {
+        const response = await fetch(`${API_BASE}/workers/projects`, {
+          headers: authHeaders(),
+        });
+        if (response.ok) {
+          const projects = (await response.json()) as { id: string; gpu?: boolean }[];
+          project = projects.find((item) => item.id === PROJECT_ID);
+        }
+      } catch {
+        // A transient project-list failure should not prevent CPU contributions.
+      }
     }
-
-    const project = projects.find((item) => item.id === PROJECT_ID);
     const requiresCuda = project?.gpu === true;
     const wantsCuda = process.env.USE_CUDA === "1" && Boolean(process.env.MODEL_PATH);
     if (!requiresCuda && !wantsCuda) {
@@ -303,7 +309,7 @@ export function runWorker(options: RunOptions): RunHandle {
     });
     log(
       "info",
-      `\n📦 [${chunkIndex}] #${chunk.jobNumber} — ${chunk.opName} (${chunk.opType})`,
+      `\n📦 [${chunkIndex}] ${chunk.projectName} · #${chunk.jobNumber} — ${chunk.opName} (${chunk.opType})`,
     );
 
     const workDir = await mkdtemp(join(tmpdir(), "computeloop-"));

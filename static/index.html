@@ -142,9 +142,9 @@
   <section class="card" id="connectCard">
     <div class="card-head"><span class="step">1</span> Connect your machine</div>
     <p class="hint">
-      Register your machine on the project's <strong>Contribute</strong> page in
-      the web app, copy the key it shows (only once), and paste it here.
-      The key is stored on this machine only — you never have to type it again.
+      Register this machine once on a project's <strong>Contribute</strong> page,
+      then paste the one-time key here. This client automatically finds eligible
+      work across the contributor network; you do not attach to projects one by one.
     </p>
     <form id="keyForm">
       <label>Worker API key
@@ -165,20 +165,21 @@
 
   <!-- 2 · Work -->
   <section class="card" id="workCard" hidden>
-    <div class="card-head"><span class="step">2</span> Pick a project &amp; start</div>
+    <div class="card-head"><span class="step">2</span> Join the contributor network</div>
     <p class="hint" id="connectedAs">&nbsp;</p>
     <div class="row">
-      <select id="projectSelect"><option value="">Loading projects&hellip;</option></select>
+      <div class="hint" id="availableWork">Checking available projects&hellip;</div>
       <button class="ghost" id="refreshBtn" title="Refresh project list">&#10227; Refresh</button>
     </div>
     <div class="row">
       <button class="primary" id="startBtn">Start contributing</button>
       <button class="danger" id="stopBtn" hidden>Stop</button>
       <span class="stat">Chunks this run: <strong id="chunkCount">0</strong></span>
+      <span class="stat">Credits earned: <strong id="creditsEarned">0</strong></span>
     </div>
     <p class="hint" style="margin-top:12px">
-      Stopping finishes the chunk already running first, so nothing you
-      processed is lost. Your machine only runs the platform's standardized
+      The client automatically picks eligible work from the network. Stopping
+      finishes the chunk already running first. It only runs platform-approved
       operations — never renter code.
     </p>
     <p class="error" id="workError" hidden></p>
@@ -252,36 +253,26 @@
     $("connectCard").hidden = s.configured;
     $("workCard").hidden = !s.configured;
     $("chunkCount").textContent = s.completedChunks;
+    $("creditsEarned").textContent = Number(s.creditsEarned ?? 0).toLocaleString();
 
     if (s.worker) {
       $("connectedAs").textContent =
         "Connected as " + s.worker.name + " · " + s.apiBase;
     }
 
-    const select = $("projectSelect");
     if (s.projects && s.projects.length) {
-      const current = s.projectId;
-      select.innerHTML = "";
-      for (const project of s.projects) {
-        const option = document.createElement("option");
-        option.value = project.id;
-        option.textContent =
-          project.name + " · " + project.opName + " · " + project.pendingJobs + " chunks left" +
-          (project.requiresCuda ? " · NVIDIA CUDA required" : "");
-        select.appendChild(option);
-      }
-      if (current && s.projects.some((p) => p.id === current)) {
-        select.value = current;
-      }
+      const projects = s.projects.map((project) =>
+        `<div class="line">${escapeHtml(project.name)} · ${escapeHtml(project.opName)} · ${project.pendingJobs} chunks · ${project.rewardPerChunk ?? 0} credits/chunk${project.requiresCuda ? " · NVIDIA CUDA" : ""}</div>`,
+      ).join("");
+      $("availableWork").innerHTML = `<strong>Available network work</strong>${projects}`;
     } else if (s.configured) {
-      select.innerHTML = '<option value="">No open projects right now</option>';
+      $("availableWork").innerHTML = "No queued work right now. Keep contributing enabled and this client will pick up new eligible tasks automatically.";
     }
 
-    select.disabled = s.running;
     $("refreshBtn").disabled = s.running;
     $("startBtn").hidden = s.running;
     $("stopBtn").hidden = !s.running;
-    $("startBtn").disabled = !s.projects || s.projects.length === 0;
+    $("startBtn").disabled = false;
 
     renderPill(s.status, s.running, s.statusDetail);
 
@@ -291,6 +282,12 @@
     } else if (s.status !== "error") {
       hideError("workError");
     }
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>\"']/g, (character) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+    })[character]);
   }
 
   function showError(id, message) {
@@ -398,7 +395,7 @@
       await api("/api/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: $("projectSelect").value }),
+        body: JSON.stringify({}),
       });
       appendLog("▶ Worker started", null);
       await loadState();
@@ -443,6 +440,9 @@
       if (!loaded.projects || !loaded.projects.length) await loadProjects();
     }
     pollTimer = setInterval(loadState, 2500);
+    setInterval(() => {
+      if (state && state.configured) void loadProjects();
+    }, 10000);
   })();
 </script>
 </body>

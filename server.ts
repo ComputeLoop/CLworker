@@ -21,11 +21,14 @@ interface ProjectInfo {
   totalJobs: number;
   completedJobs: number;
   pendingJobs: number;
+  rewardPerChunk: number;
 }
 
 let config: WorkerConfig = loadConfig();
 let runner: RunHandle | null = null;
 let completedChunks = 0;
+let creditBalance = 0;
+let creditsEarned = 0;
 let status: WorkerEvent | null = null;
 let projects: ProjectInfo[] = [];
 const subscribers = new Set<(event: WorkerEvent) => void>();
@@ -171,6 +174,17 @@ async function handleProjects() {
       config.apiBase ?? DEFAULT_API_BASE,
       config.apiKey,
     );
+    const accountResponse = await fetch(`${config.apiBase ?? DEFAULT_API_BASE}/workers/me`, {
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+    });
+    if (accountResponse.ok) {
+      const account = (await accountResponse.json()) as {
+        creditBalance?: number;
+        creditsEarned?: number;
+      };
+      creditBalance = account.creditBalance ?? creditBalance;
+      creditsEarned = account.creditsEarned ?? creditsEarned;
+    }
   } catch (error) {
     return jsonError(
       error instanceof Error ? error.message : "Failed to fetch projects",
@@ -191,8 +205,7 @@ async function handleStart(request: Request) {
   } catch {
     body = {};
   }
-  const projectId = (body.projectId ?? "").trim();
-  if (!projectId) return jsonError("Pick a project to work on.");
+  const projectId = (body.projectId ?? "").trim() || undefined;
 
   config = saveConfig({ projectId });
   completedChunks = 0;
@@ -223,6 +236,8 @@ function handleState() {
     projectId: config.projectId ?? null,
     projects,
     completedChunks,
+    creditBalance,
+    creditsEarned,
     status: status?.type === "status" ? status.status : null,
     statusDetail: status?.type === "status" ? (status.detail ?? null) : null,
   });
