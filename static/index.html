@@ -159,7 +159,7 @@
       <details>
         <summary>Custom backend server</summary>
         <label>Backend URL
-          <input id="apiBaseInput" type="url" placeholder="https://cl.elysiavernight.com"
+          <input id="apiBaseInput" type="url" value="https://cl.elysiavernight.com" placeholder="https://cl.elysiavernight.com"
                  autocomplete="off" spellcheck="false" />
         </label>
       </details>
@@ -269,6 +269,7 @@
   // ---- state -------------------------------------------------------------
   function render(s) {
     state = s;
+    if (!$('apiBaseInput').value) $('apiBaseInput').value = s.apiBase || 'https://cl.elysiavernight.com';
     $("connectCard").hidden = s.configured;
     $("workCard").hidden = !s.configured;
     $("chunkCount").textContent = s.completedChunks;
