@@ -17,7 +17,7 @@ namespace ComputeLoop
 
     public static class DirectMlAdapter
     {
-        private static readonly Guid Factory1Id = new Guid("770aae78-f26f-4dba-a829-253c83d1b387");
+        private const string Factory1IdText = "770aae78-f26f-4dba-a829-253c83d1b387";
         private const int DxgiErrorNotFound = unchecked((int)0x887A0002);
         private const uint NvidiaVendorId = 0x10DE;
         private const uint SoftwareAdapterFlag = 2;
@@ -52,7 +52,8 @@ namespace ComputeLoop
             IntPtr factory = IntPtr.Zero;
             try
             {
-                int createResult = CreateDXGIFactory1(ref Factory1Id, out factory);
+                Guid factory1Id = new Guid(Factory1IdText);
+                int createResult = CreateDXGIFactory1(ref factory1Id, out factory);
                 if (createResult < 0) Marshal.ThrowExceptionForHR(createResult);
 
                 IntPtr factoryVtable = Marshal.ReadIntPtr(factory);

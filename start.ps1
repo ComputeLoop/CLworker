@@ -62,6 +62,7 @@ $nvidiaSmiPath = Join-Path $env:ProgramFiles "NVIDIA Corporation\NVSMI\nvidia-sm
 $nvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
 if (-not $nvidiaSmi -and (Test-Path $nvidiaSmiPath)) { $nvidiaSmi = Get-Item $nvidiaSmiPath }
 Remove-Item Env:GPU_BACKEND -ErrorAction SilentlyContinue
+Remove-Item Env:GPU_DEVICE_ID -ErrorAction SilentlyContinue
 Remove-Item Env:MODEL_PATH -ErrorAction SilentlyContinue
 Remove-Item Env:MODEL_LABELS -ErrorAction SilentlyContinue
 if ($nvidiaSmi) {
@@ -108,6 +109,7 @@ if ($nvidiaSmi) {
     Write-Warning "NVIDIA DirectML setup did not complete: $_"
     Write-Host "-> CPU projects remain available; GPU image-classification work will not be claimed."
     Remove-Item Env:GPU_BACKEND -ErrorAction SilentlyContinue
+    Remove-Item Env:GPU_DEVICE_ID -ErrorAction SilentlyContinue
     Remove-Item Env:MODEL_PATH -ErrorAction SilentlyContinue
     Remove-Item Env:MODEL_LABELS -ErrorAction SilentlyContinue
   }
