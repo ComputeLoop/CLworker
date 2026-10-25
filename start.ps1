@@ -96,7 +96,7 @@ if ($nvidiaSmi) {
 
       $env:GPU_BACKEND = "directml"
       Write-Host "-> Verifying NVIDIA DirectML with a real model inference..."
-      bun -e 'import { prepareImageClassifier } from "./ops/image-classify.ts"; await prepareImageClassifier({ modelPath: process.env.MODEL_PATH!, labelsPath: process.env.MODEL_LABELS, backend: "directml" });'
+      bun run .\scripts\preflight-directml.ts
       if ($LASTEXITCODE -eq 0) {
         Write-Host "-> NVIDIA DirectML verified; GPU image classification is enabled."
       } else {
